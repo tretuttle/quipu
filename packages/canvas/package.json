@@ -1,0 +1,105 @@
+{
+  "name": "@quipu/canvas",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./arrange": {
+      "types": "./src/arrange.ts",
+      "import": "./src/arrange.ts"
+    },
+    "./bindings": {
+      "types": "./src/bindings.ts",
+      "import": "./src/bindings.ts"
+    },
+    "./camera": {
+      "types": "./src/camera.ts",
+      "import": "./src/camera.ts"
+    },
+    "./editor": {
+      "types": "./src/editor.ts",
+      "import": "./src/editor.ts"
+    },
+    "./elements": {
+      "types": "./src/elements.ts",
+      "import": "./src/elements.ts"
+    },
+    "./fractionalIndex": {
+      "types": "./src/fractionalIndex.ts",
+      "import": "./src/fractionalIndex.ts"
+    },
+    "./geometry": {
+      "types": "./src/geometry.ts",
+      "import": "./src/geometry.ts"
+    },
+    "./history": {
+      "types": "./src/history.ts",
+      "import": "./src/history.ts"
+    },
+    "./hitTest": {
+      "types": "./src/hitTest.ts",
+      "import": "./src/hitTest.ts"
+    },
+    "./mapEdges": {
+      "types": "./src/mapEdges.ts",
+      "import": "./src/mapEdges.ts"
+    },
+    "./mapLayout": {
+      "types": "./src/mapLayout.ts",
+      "import": "./src/mapLayout.ts"
+    },
+    "./mapView": {
+      "types": "./src/mapView.ts",
+      "import": "./src/mapView.ts"
+    },
+    "./mapLod": {
+      "types": "./src/mapLod.ts",
+      "import": "./src/mapLod.ts"
+    },
+    "./persistence": {
+      "types": "./src/persistence.ts",
+      "import": "./src/persistence.ts"
+    },
+    "./random": {
+      "types": "./src/random.ts",
+      "import": "./src/random.ts"
+    },
+    "./render": {
+      "types": "./src/render.ts",
+      "import": "./src/render.ts"
+    },
+    "./scene": {
+      "types": "./src/scene.ts",
+      "import": "./src/scene.ts"
+    },
+    "./snapping": {
+      "types": "./src/snapping.ts",
+      "import": "./src/snapping.ts"
+    },
+    "./spatialIndex": {
+      "types": "./src/spatialIndex.ts",
+      "import": "./src/spatialIndex.ts"
+    },
+    "./text": {
+      "types": "./src/text.ts",
+      "import": "./src/text.ts"
+    },
+    "./tools": {
+      "types": "./src/tools.ts",
+      "import": "./src/tools.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "perfect-freehand": "1.2.3",
+    "rbush": "4.0.1",
+    "roughjs": "4.6.6"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

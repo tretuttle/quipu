@@ -370,6 +370,7 @@ interface StagePackageJson {
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
+  readonly license: string;
   readonly homepage: string;
   readonly author: string;
   readonly main: string;
@@ -1074,6 +1075,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     packageManager: rootPackageJson.packageManager,
     description:
       "Quipu is a local-first data canvas. Open any data file and see it as a map you can search, decode, edit, sort, diff, convert and draw on.",
+    license: "MIT",
     homepage: "https://quipu.trents.tech",
     author: "Trent Tuttle",
     main: "apps/desktop/dist-electron/boot.cjs",

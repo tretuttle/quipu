@@ -1,6 +1,7 @@
 {
   "name": "@quipu/shared",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "exports": {
     "./HostProcess": {

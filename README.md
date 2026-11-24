@@ -169,8 +169,13 @@ five runs. By default a missed budget is reported, not failed; set `QUIPU_ENFORC
 [formats](docs/internals/formats.md), [the web UI](docs/internals/web-ui.md) and
 [the desktop app](docs/internals/desktop.md).
 
-Quipu's application shell and much of its tooling are adapted from [T3 Code](https://github.com/pingdotgg/t3code)
-(MIT). [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) credits it and every other source with its license.
-
 The name: a quipu is the Inca record of knotted cords, strings hanging from strings, a tree of strings that carries
 data.
+
+## License
+
+Quipu is released under the [MIT License](LICENSE).
+
+Its application shell and much of its tooling are adapted from [T3 Code](https://github.com/pingdotgg/t3code), which
+is also MIT. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) credits it and every other source with its license. The
+app lists the notices of those projects and of the packages it is built from under Settings → Open source licenses.

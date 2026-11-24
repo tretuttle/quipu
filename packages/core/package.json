@@ -1,0 +1,196 @@
+{
+  "name": "@quipu/core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./appendBuffer": {
+      "types": "./src/appendBuffer.ts",
+      "import": "./src/appendBuffer.ts"
+    },
+    "./base64": {
+      "types": "./src/base64.ts",
+      "import": "./src/base64.ts"
+    },
+    "./boundedSlice": {
+      "types": "./src/boundedSlice.ts",
+      "import": "./src/boundedSlice.ts"
+    },
+    "./bytes": {
+      "types": "./src/bytes.ts",
+      "import": "./src/bytes.ts"
+    },
+    "./decode": {
+      "types": "./src/decode.ts",
+      "import": "./src/decode.ts"
+    },
+    "./decoders": {
+      "types": "./src/decoders.ts",
+      "import": "./src/decoders.ts"
+    },
+    "./detect": {
+      "types": "./src/detect.ts",
+      "import": "./src/detect.ts"
+    },
+    "./detectString": {
+      "types": "./src/detectString.ts",
+      "import": "./src/detectString.ts"
+    },
+    "./document": {
+      "types": "./src/document.ts",
+      "import": "./src/document.ts"
+    },
+    "./edits": {
+      "types": "./src/edits.ts",
+      "import": "./src/edits.ts"
+    },
+    "./escape": {
+      "types": "./src/escape.ts",
+      "import": "./src/escape.ts"
+    },
+    "./escapeView": {
+      "types": "./src/escapeView.ts",
+      "import": "./src/escapeView.ts"
+    },
+    "./form": {
+      "types": "./src/form.ts",
+      "import": "./src/form.ts"
+    },
+    "./format": {
+      "types": "./src/format.ts",
+      "import": "./src/format.ts"
+    },
+    "./graphqlPretty": {
+      "types": "./src/graphqlPretty.ts",
+      "import": "./src/graphqlPretty.ts"
+    },
+    "./gzip": {
+      "types": "./src/gzip.ts",
+      "import": "./src/gzip.ts"
+    },
+    "./indexBuffer": {
+      "types": "./src/indexBuffer.ts",
+      "import": "./src/indexBuffer.ts"
+    },
+    "./indexDocument": {
+      "types": "./src/indexDocument.ts",
+      "import": "./src/indexDocument.ts"
+    },
+    "./jobs": {
+      "types": "./src/jobs.ts",
+      "import": "./src/jobs.ts"
+    },
+    "./journal": {
+      "types": "./src/journal.ts",
+      "import": "./src/journal.ts"
+    },
+    "./journalStore": {
+      "types": "./src/journalStore.ts",
+      "import": "./src/journalStore.ts"
+    },
+    "./jsonScan": {
+      "types": "./src/jsonScan.ts",
+      "import": "./src/jsonScan.ts"
+    },
+    "./jsonText": {
+      "types": "./src/jsonText.ts",
+      "import": "./src/jsonText.ts"
+    },
+    "./jwt": {
+      "types": "./src/jwt.ts",
+      "import": "./src/jwt.ts"
+    },
+    "./localPool": {
+      "types": "./src/localPool.ts",
+      "import": "./src/localPool.ts"
+    },
+    "./merge": {
+      "types": "./src/merge.ts",
+      "import": "./src/merge.ts"
+    },
+    "./ndjson": {
+      "types": "./src/ndjson.ts",
+      "import": "./src/ndjson.ts"
+    },
+    "./opfsJournalStore": {
+      "types": "./src/opfsJournalStore.ts",
+      "import": "./src/opfsJournalStore.ts"
+    },
+    "./pathParse": {
+      "types": "./src/pathParse.ts",
+      "import": "./src/pathParse.ts"
+    },
+    "./pieceSource": {
+      "types": "./src/pieceSource.ts",
+      "import": "./src/pieceSource.ts"
+    },
+    "./pieceTable": {
+      "types": "./src/pieceTable.ts",
+      "import": "./src/pieceTable.ts"
+    },
+    "./pool": {
+      "types": "./src/pool.ts",
+      "import": "./src/pool.ts"
+    },
+    "./protocol": {
+      "types": "./src/protocol.ts",
+      "import": "./src/protocol.ts"
+    },
+    "./resolve": {
+      "types": "./src/resolve.ts",
+      "import": "./src/resolve.ts"
+    },
+    "./save": {
+      "types": "./src/save.ts",
+      "import": "./src/save.ts"
+    },
+    "./scan": {
+      "types": "./src/scan.ts",
+      "import": "./src/scan.ts"
+    },
+    "./search": {
+      "types": "./src/search.ts",
+      "import": "./src/search.ts"
+    },
+    "./searchRun": {
+      "types": "./src/searchRun.ts",
+      "import": "./src/searchRun.ts"
+    },
+    "./segmentedTape": {
+      "types": "./src/segmentedTape.ts",
+      "import": "./src/segmentedTape.ts"
+    },
+    "./sniff": {
+      "types": "./src/sniff.ts",
+      "import": "./src/sniff.ts"
+    },
+    "./source": {
+      "types": "./src/source.ts",
+      "import": "./src/source.ts"
+    },
+    "./tape": {
+      "types": "./src/tape.ts",
+      "import": "./src/tape.ts"
+    },
+    "./testing/samples": {
+      "types": "./src/testing/samples.ts",
+      "import": "./src/testing/samples.ts"
+    },
+    "./testing/walk": {
+      "types": "./src/testing/walk.ts",
+      "import": "./src/testing/walk.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@quipu/contracts": "workspace:*",
+    "effect": "catalog:",
+    "graphql": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

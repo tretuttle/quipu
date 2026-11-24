@@ -1,0 +1,189 @@
+{
+  "name": "@quipu/formats",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./abort": {
+      "types": "./src/abort.ts",
+      "import": "./src/abort.ts"
+    },
+    "./byteWriter": {
+      "types": "./src/byteWriter.ts",
+      "import": "./src/byteWriter.ts"
+    },
+    "./convert": {
+      "types": "./src/convert.ts",
+      "import": "./src/convert.ts"
+    },
+    "./convertRegion": {
+      "types": "./src/convertRegion.ts",
+      "import": "./src/convertRegion.ts"
+    },
+    "./convertSource": {
+      "types": "./src/convertSource.ts",
+      "import": "./src/convertSource.ts"
+    },
+    "./csvEmit": {
+      "types": "./src/csvEmit.ts",
+      "import": "./src/csvEmit.ts"
+    },
+    "./csvField": {
+      "types": "./src/csvField.ts",
+      "import": "./src/csvField.ts"
+    },
+    "./csvToJson": {
+      "types": "./src/csvToJson.ts",
+      "import": "./src/csvToJson.ts"
+    },
+    "./detect": {
+      "types": "./src/detect.ts",
+      "import": "./src/detect.ts"
+    },
+    "./engineFormats": {
+      "types": "./src/engineFormats.ts",
+      "import": "./src/engineFormats.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts"
+    },
+    "./formatIds": {
+      "types": "./src/formatIds.ts",
+      "import": "./src/formatIds.ts"
+    },
+    "./indexLines": {
+      "types": "./src/indexLines.ts",
+      "import": "./src/indexLines.ts"
+    },
+    "./indexXml": {
+      "types": "./src/indexXml.ts",
+      "import": "./src/indexXml.ts"
+    },
+    "./jobs": {
+      "types": "./src/jobs.ts",
+      "import": "./src/jobs.ts"
+    },
+    "./jsonEmit": {
+      "types": "./src/jsonEmit.ts",
+      "import": "./src/jsonEmit.ts"
+    },
+    "./jsoncBlank": {
+      "types": "./src/jsoncBlank.ts",
+      "import": "./src/jsoncBlank.ts"
+    },
+    "./jsonScan": {
+      "types": "./src/jsonScan.ts",
+      "import": "./src/jsonScan.ts"
+    },
+    "./jsonValueWriter": {
+      "types": "./src/jsonValueWriter.ts",
+      "import": "./src/jsonValueWriter.ts"
+    },
+    "./lineTape": {
+      "types": "./src/lineTape.ts",
+      "import": "./src/lineTape.ts"
+    },
+    "./localPool": {
+      "types": "./src/localPool.ts",
+      "import": "./src/localPool.ts"
+    },
+    "./locate": {
+      "types": "./src/locate.ts",
+      "import": "./src/locate.ts"
+    },
+    "./ndjsonToJson": {
+      "types": "./src/ndjsonToJson.ts",
+      "import": "./src/ndjsonToJson.ts"
+    },
+    "./pool": {
+      "types": "./src/pool.ts",
+      "import": "./src/pool.ts"
+    },
+    "./regionStop": {
+      "types": "./src/regionStop.ts",
+      "import": "./src/regionStop.ts"
+    },
+    "./stringEnd": {
+      "types": "./src/stringEnd.ts",
+      "import": "./src/stringEnd.ts"
+    },
+    "./textDecode": {
+      "types": "./src/textDecode.ts",
+      "import": "./src/textDecode.ts"
+    },
+    "./textDocument": {
+      "types": "./src/textDocument.ts",
+      "import": "./src/textDocument.ts"
+    },
+    "./tomlEmit": {
+      "types": "./src/tomlEmit.ts",
+      "import": "./src/tomlEmit.ts"
+    },
+    "./tomlTape": {
+      "types": "./src/tomlTape.ts",
+      "import": "./src/tomlTape.ts"
+    },
+    "./valueSource": {
+      "types": "./src/valueSource.ts",
+      "import": "./src/valueSource.ts"
+    },
+    "./xmlDecode": {
+      "types": "./src/xmlDecode.ts",
+      "import": "./src/xmlDecode.ts"
+    },
+    "./xmlEmit": {
+      "types": "./src/xmlEmit.ts",
+      "import": "./src/xmlEmit.ts"
+    },
+    "./xmlTape": {
+      "types": "./src/xmlTape.ts",
+      "import": "./src/xmlTape.ts"
+    },
+    "./xmlToJson": {
+      "types": "./src/xmlToJson.ts",
+      "import": "./src/xmlToJson.ts"
+    },
+    "./yamlEmit": {
+      "types": "./src/yamlEmit.ts",
+      "import": "./src/yamlEmit.ts"
+    },
+    "./yamlTape": {
+      "types": "./src/yamlTape.ts",
+      "import": "./src/yamlTape.ts"
+    },
+    "./testing/convertRun": {
+      "types": "./src/testing/convertRun.ts",
+      "import": "./src/testing/convertRun.ts"
+    },
+    "./testing/run": {
+      "types": "./src/testing/run.ts",
+      "import": "./src/testing/run.ts"
+    },
+    "./testing/tapeValue": {
+      "types": "./src/testing/tapeValue.ts",
+      "import": "./src/testing/tapeValue.ts"
+    },
+    "./testing/textValue": {
+      "types": "./src/testing/textValue.ts",
+      "import": "./src/testing/textValue.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@quipu/contracts": "workspace:*",
+    "@quipu/core": "workspace:*",
+    "effect": "catalog:",
+    "saxes": "6.0.0",
+    "smol-toml": "1.8.0",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "csv-parse": "7.0.3",
+    "csv-stringify": "6.9.0",
+    "vite-plus": "catalog:"
+  }
+}

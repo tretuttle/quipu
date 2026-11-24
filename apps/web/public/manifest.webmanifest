@@ -1,0 +1,23 @@
+{
+  "name": "Quipu",
+  "short_name": "Quipu",
+  "description": "Open JSON, HAR, YAML, TOML, XML and CSV files as a map, tree and source view. Search, decode, edit, convert and draw. Your files never leave your device.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    {
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

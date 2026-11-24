@@ -1,6 +1,66 @@
 {
   "customNotices": [
     {
+      "name": "T3 Code",
+      "license": "MIT",
+      "sourceUrl": "https://github.com/pingdotgg/t3code",
+      "bundles": ["desktop", "web"],
+      "generatedNotices": [
+        {
+          "licenseId": "MIT",
+          "copyrights": ["Copyright (c) 2026 T3 Tools Inc."],
+          "preamble": [
+            "Quipu's application shell, its desktop wrapper, its UI components and much of its tooling are adapted from T3 Code."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "shadcn/ui",
+      "license": "MIT",
+      "sourceUrl": "https://github.com/shadcn-ui/ui",
+      "bundles": ["web"],
+      "generatedNotices": [
+        {
+          "licenseId": "MIT",
+          "copyrights": ["Copyright (c) 2023 shadcn"],
+          "preamble": [
+            "Quipu's UI components descend, by way of T3 Code, from components of shadcn/ui."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "coss ui",
+      "license": "MIT",
+      "sourceUrl": "https://github.com/cosscom/ui",
+      "bundles": ["web"],
+      "generatedNotices": [
+        {
+          "licenseId": "MIT",
+          "copyrights": ["Copyright (c) 2025 coss.com and Origin UI"],
+          "preamble": [
+            "Quipu's UI components descend, by way of T3 Code, from components of coss ui."
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Excalidraw",
+      "license": "MIT",
+      "sourceUrl": "https://github.com/excalidraw/excalidraw",
+      "bundles": ["web"],
+      "generatedNotices": [
+        {
+          "licenseId": "MIT",
+          "copyrights": ["Copyright (c) 2020 Excalidraw"],
+          "preamble": [
+            "Quipu's drawing elements follow the shape of Excalidraw's, and its canvas adopts several of Excalidraw's constants. No Excalidraw source file is included."
+          ]
+        }
+      ]
+    },
+    {
       "name": "jq",
       "version": "1.8.2",
       "license": "MIT",

@@ -1,9 +1,14 @@
 # Third-party notices
 
 Quipu includes source code and assets adapted from the projects below. Each is credited here with
-its license. Packages that Quipu installs as dependencies are not listed here: their notices are
-generated from `third-party-licenses.config.json` by `vp run licenses:sync` and shown in the app under
+its license. Packages that Quipu installs as dependencies are not listed here: the web build collects
+their notices, with the entries of `third-party-licenses.config.json`, into the list the app shows under
 Settings → Open source licenses.
+
+A project below whose material is part of the app needs an entry in that list too, so that its notice
+goes out with every build and not only with the source. T3 Code, shadcn/ui, coss ui and Excalidraw are
+`customNotices` in `third-party-licenses.config.json`; vscode-textmate and Shiki are dependencies, so
+theirs are collected already.
 
 Several of these projects use the MIT License. Its text is printed once, under T3 Code; each MIT
 entry below gives its own copyright notice, to which that same permission notice applies.

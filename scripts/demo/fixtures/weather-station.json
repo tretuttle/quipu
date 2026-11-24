@@ -1,0 +1,59 @@
+{
+  "station": "Ridgeline 14",
+  "network": "Alpine weather network",
+  "status": "online",
+  "location": {
+    "lat": 46.52,
+    "lon": 7.98,
+    "elevation_m": 2140
+  },
+  "sensors": [
+    {
+      "id": "temp-1",
+      "kind": "temperature",
+      "unit": "C",
+      "last": -3.4
+    },
+    {
+      "id": "hum-1",
+      "kind": "humidity",
+      "unit": "%",
+      "last": 81
+    },
+    {
+      "id": "wind-1",
+      "kind": "wind speed",
+      "unit": "m/s",
+      "last": 12.6
+    },
+    {
+      "id": "wind-2",
+      "kind": "wind direction",
+      "unit": "deg",
+      "last": 285
+    },
+    {
+      "id": "sd-1",
+      "kind": "snow depth",
+      "unit": "cm",
+      "last": 142
+    }
+  ],
+  "uplink": {
+    "gateway": "gw-valley-02",
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdGF0aW9uLTE0Iiwic2NvcGUiOiJ0ZWxlbWV0cnk6d3JpdGUiLCJpYXQiOjE3NjcyMjU2MDAsImV4cCI6MTc2NzIyOTIwMH0.c2lnbmVkLWJ5LXRoZS1nYXRld2F5",
+    "last_packet": "{\"seq\":48211,\"battery_v\":12.7,\"solar_w\":38.5,\"readings\":{\"temperature_c\":-3.4,\"humidity_pct\":81,\"wind_ms\":12.6,\"gust_ms\":19.2}}"
+  },
+  "alerts": [
+    {
+      "level": "watch",
+      "message": "Fresh snow expected above 2000 m",
+      "until": "2026-01-01T18:00:00Z"
+    },
+    {
+      "level": "info",
+      "message": "Snow sensor cleaned",
+      "at": "2026-01-01T07:45:00Z"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@quipu/scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --passWithNoTests --config ../vite.config.ts --dir . --exclude '**/*.e2e.test.ts'",
+    "test:e2e": "vp test run --config ../vite.config.ts --dir . e2e.test"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@quipu/shared": "workspace:*",
+    "effect": "catalog:",
+    "sharp": "0.35.4",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "playwright-core": "1.60.0",
+    "typescript": "catalog:",
+    "typescript-legacy": "npm:typescript@~6.0.3",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

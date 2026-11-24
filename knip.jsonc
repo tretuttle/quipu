@@ -1,0 +1,61 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Exported types are part of our contracts even before they have consumers. Catalog
+  // entries also feed the pnpm overrides in pnpm-workspace.yaml, which knip does not read.
+  "rules": { "types": "off", "nsTypes": "off", "catalog": "off" },
+  // Supplied by the OS rather than npm.
+  "ignoreBinaries": ["file"],
+  // Named as a TypeScript plugin in the tsconfig files; @effect/tsgo provides it.
+  "ignoreDependencies": ["@effect/language-service"],
+  "workspaces": {
+    ".": {
+      "project": ["*.{js,mjs,cjs,ts,mts,cts}"],
+    },
+    "scripts": {
+      // Knip loads its preprocessor through a CLI option.
+      "entry": ["knip-schemas.ts"],
+      // These are command-line scripts, not a library: a helper may be exported for its test.
+      "ignoreExportsUsedInFile": true,
+    },
+    "apps/desktop": {
+      // Electron loads these bundles by filename rather than importing them.
+      "entry": ["src/boot.ts!", "src/compileCache.ts!", "src/main.ts!", "src/preload.ts!"],
+      // The artifact script runs electron-builder from this workspace, outside its
+      // package scripts.
+      "ignoreDependencies": ["electron-builder"],
+      // boot.ts loads the bundles the build writes next to it.
+      "ignoreUnresolved": ["./compileCache.cjs", "./main.cjs"],
+    },
+    "apps/web": {
+      // Workers are constructed by URL, never imported; the bench runs under node.
+      //
+      // The source e2e imports its harness by URL in the page it drives, so no
+      // module imports it.
+      "entry": [
+        "src/engine/*.worker.ts",
+        "src/documents/*.worker.ts",
+        "bench/board-frames.ts",
+        "bench/map-frames.ts",
+        "e2e/sourceHarness.tsx",
+        "bench/bench.ts",
+      ],
+      // UI component modules are copied and adapted as cohesive sets. Keep their
+      // named subcomponents even before they have callers; the file audit still
+      // reports an entire component module when nothing imports it.
+      "ignoreIssues": {
+        "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"],
+        // The engine's typed client is the API the views consume; it exists
+        // before its first caller.
+        "src/engine/client.ts": ["exports"],
+      },
+    },
+    "packages/formats": {
+      // The benches are run by hand under the memory guard (docs/internals/formats.md).
+      "entry": ["bench/*.ts"],
+    },
+    "packages/*": {
+      // These workspace packages are private to this monorepo.
+      "includeEntryExports": true,
+    },
+  },
+}

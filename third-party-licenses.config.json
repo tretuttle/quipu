@@ -1,0 +1,73 @@
+{
+  "customNotices": [
+    {
+      "name": "jq",
+      "version": "1.8.2",
+      "license": "MIT",
+      "sourceUrl": "https://github.com/jqlang/jq",
+      "generatedNotices": [
+        {
+          "licenseId": "MIT",
+          "copyrights": ["Copyright (C) 2012 Stephen Dolan"]
+        }
+      ]
+    },
+    {
+      "name": "Oniguruma",
+      "version": "6.9",
+      "license": "BSD-2-Clause",
+      "sourceUrl": "https://github.com/kkos/oniguruma",
+      "generatedNotices": [
+        {
+          "licenseId": "BSD-2-Clause",
+          "copyrights": ["Copyright (c) 2002-2021 K.Kosako"]
+        }
+      ]
+    }
+  ],
+  "packageOverrides": [
+    {
+      "name": "@fontsource/kalam",
+      "license": "OFL-1.1",
+      "sourceUrl": "https://fonts.google.com/specimen/Kalam"
+    },
+    {
+      "name": "@electron-internal/extract-zip",
+      "generatedNotice": {
+        "licenseId": "BSD-2-Clause",
+        "copyrights": ["Copyright (c) 2026 Samuel Attard and Electron contributors"]
+      }
+    },
+    {
+      "name": "isarray",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2013 Julian Gruber <julian@juliangruber.com>"]
+      }
+    },
+    {
+      "name": "lazy-val",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) Vladimir Krivosheev"]
+      }
+    },
+    {
+      "name": "lru_map",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2010-2016 Rasmus Andersson <https://rsms.me/>"]
+      }
+    },
+    {
+      "name": "saxes",
+      "generatedNotice": {
+        "licenseId": "ISC",
+        "copyrights": [
+          "Copyright (c) Contributors",
+          "Copyright (c) Isaac Z. Schlueter and Contributors"
+        ]
+      }
+    }
+  ]
+}

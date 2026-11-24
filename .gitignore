@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+apps/*/dist
+packages/*/dist
+dist-electron/
+.astro
+.tanstack
+/.generated/
+*.tsbuildinfo
+
+# Desktop release artifacts
+release/
+
+# Test output
+__screenshots__/
+.vitest-*
+
+# Bench reports (fixtures are generated outside the repository)
+apps/web/bench/out/
+/bench/results/
+
+# Local environment
+.env*
+!.env.example
+
+# Logs, editors and OS files
+*.log
+.idea/
+.vscode/
+.DS_Store
+
+# Demo clips
+/demo-out/

@@ -1,0 +1,8 @@
+[tools]
+node = "24.21.0"
+"npm:vite-plus" = "1.0.0"
+
+[env]
+# The workspace's own vite-plus (same pinned version) wins once `vp i` has run,
+# so tests, lint and build share one Vite+ instance with the packages they load.
+_.path = ["{{config_root}}/node_modules/.bin"]

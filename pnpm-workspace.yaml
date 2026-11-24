@@ -1,0 +1,136 @@
+packages:
+  - apps/*
+  - packages/*
+  - oxlint-plugin-quipu
+  - scripts
+
+# Successor to onlyBuiltDependencies/ignoredBuiltDependencies (pnpm 11).
+# true = allowed to run build scripts; false mirrors the pnpm 10 behavior
+# where anything outside onlyBuiltDependencies was silently not built.
+allowBuilds:
+  bufferutil: false
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  msw: false
+  utf-8-validate: false
+
+catalog:
+  "@effect/atom-react": 4.0.2
+  "@effect/platform-node": 4.0.2
+  "@effect/tsgo": 0.46.1
+  "@effect/vitest": 4.0.2
+  "@legendapp/list": 3.3.5
+  "@noble/hashes": 1.8.0
+  "@pierre/diffs": 1.5.2
+  "@tailwindcss/node": 4.3.3
+  "@tailwindcss/oxide": 4.3.3
+  "@tailwindcss/vite": 4.3.3
+  "@types/node": 24.12.4
+  effect: 4.0.2
+  graphql: 16.14.1
+  lightningcss: 1.33.0
+  tailwindcss: 4.3.3
+  typescript: 7.0.2
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
+  vite-plus: 1.0.0
+  yaml: ^2.9.0
+  remark-gfm: 4.0.1
+
+minimumReleaseAgeExclude:
+  - "@effect/atom-react@4.0.2"
+  - "@effect/platform-node@4.0.2"
+  - "@effect/vitest@4.0.2"
+  - effect@4.0.2
+  - "@legendapp/list@3.3.5"
+  - electron@44.4.5
+  - "@shadcn/lint@0.1.5"
+  - "react@19.3.0"
+  - "react-dom@19.3.0"
+
+overrides:
+  # Keep jsdom's optional peer consistent so Vite+ has one test-runner instance.
+  "@exodus/bytes>@noble/hashes": "1.8.0"
+  "@effect/atom-react": "catalog:"
+  "@effect/platform-node": "catalog:"
+  "@effect/vitest": "catalog:"
+  "@effect/vitest>vitest": "-"
+  "@pierre/diffs>@shikijs/transformers": 4.2.0
+  # Keep the shiki tree on one tested set of versions. @shikijs/themes and @shikijs/types
+  # are 4.3.0, where @pierre/diffs peers on them.
+  "@shikijs/core": 4.2.0
+  "@shikijs/engine-javascript": 4.2.0
+  "@shikijs/engine-oniguruma": 4.2.0
+  "@shikijs/langs": 4.2.0
+  "@shikijs/primitive": 4.2.0
+  "@shikijs/themes": 4.3.0
+  "@shikijs/types": 4.3.0
+  "@ungap/structured-clone": 1.3.1
+  micromark-util-types: 2.0.2
+  shiki: 4.2.0
+  # Keep one copy of these native-binary packages. lightningcss ships 11 platform binaries per
+  # version, and the workspaces' tailwindcss ^4 ranges drift into two 4.3.x copies of the family.
+  "@tailwindcss/node": "catalog:"
+  "@tailwindcss/oxide": "catalog:"
+  "@tailwindcss/vite": "catalog:"
+  "@types/node": "catalog:"
+  # Hold electron-builder's tree at the patch releases desktop packaging is tested with; the
+  # parent-scoped entries keep per-parent versions. core-util-is is also reached through jszip's
+  # readable-stream 2.3.8 (apps/web).
+  "@electron/rebuild": 4.0.4
+  "@electron/universal>fs-extra": 11.3.5
+  "@electron/windows-sign>fs-extra": 11.3.5
+  "@peculiar/asn1-schema": 2.8.0
+  "app-builder-lib>@noble/hashes": 2.2.0
+  "app-builder-lib>minimatch": 10.2.5
+  "pkijs>@noble/hashes": 1.4.0
+  core-util-is: 1.0.2
+  http-cache-semantics: 4.2.0
+  node-abi: 4.33.0
+  pkijs: 3.4.0
+  pvutils: 1.1.5
+  # These shiki-tree parents stay on @types/hast 3.0.4; everything else takes 3.0.5.
+  "@shikijs/core>@types/hast": 3.0.4
+  "@shikijs/primitive>@types/hast": 3.0.4
+  "@shikijs/types>@types/hast": 3.0.4
+  "hast-util-to-html>@types/hast": 3.0.4
+  "hast-util-whitespace>@types/hast": 3.0.4
+  "mdast-util-to-hast>@types/hast": 3.0.4
+  "shiki>@types/hast": 3.0.4
+  # tinyglobby@0.2.17's picomatch edge stays on 4.0.4; everything else takes 4.0.7.
+  "tinyglobby@0.2.17>picomatch": 4.0.4
+  effect: "catalog:"
+  lightningcss: "catalog:"
+  tailwindcss: "catalog:"
+  vite: "catalog:"
+  vite-plus: "catalog:"
+  yaml: "catalog:"
+  # One version each of these packages, shared by several dependencies.
+  "minimatch@>=10.2.4 <10.3.0": "10.2.5"
+  "caniuse-lite": "1.0.30001810"
+  "get-stream": "5.2.0"
+  "path-key": "3.1.1"
+  "verkit": "0.4.1"
+  "zustand": "5.0.14"
+
+packageExtensions:
+  # Our patch makes @effect/vitest import vite-plus/test. A catalog: spec here
+  # resolves through the vite-plus override above.
+  "@effect/vitest@*":
+    dependencies:
+      vite-plus: "catalog:"
+
+patchedDependencies:
+  "@effect/vitest@4.0.2": patches/@effect__vitest@4.0.2.patch
+  "@pierre/diffs@1.5.2": patches/@pierre%2Fdiffs@1.5.2.patch
+
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"
+
+supportedArchitectures:
+  cpu: [current, x64]
+  libc: [current, glibc]
+  os: [current, linux]

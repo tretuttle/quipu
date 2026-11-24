@@ -1,0 +1,49 @@
+{
+  "name": "@quipu/monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "effect-tsgo patch && vp config --no-agent",
+    "dev": "vp run --filter @quipu/web dev",
+    "dev:web": "vp run --filter @quipu/web dev",
+    "dev:desktop": "vp run --filter @quipu/desktop dev",
+    "dev:marketing": "vp run --filter @quipu/marketing dev",
+    "start:desktop": "vp run --filter @quipu/desktop start",
+    "start:marketing": "vp run --filter @quipu/marketing preview",
+    "licenses:sync": "node scripts/sync-third-party-license-notices.ts",
+    "build": "vp run --filter './apps/*' build",
+    "build:desktop": "vp run --filter @quipu/desktop --filter @quipu/web build",
+    "build:marketing": "vp run --filter @quipu/marketing build",
+    "dist:desktop:artifact": "node scripts/build-desktop-artifact.ts",
+    "dist:desktop:linux": "node scripts/build-desktop-artifact.ts --platform linux --target AppImage --arch x64",
+    "dist:desktop:win": "node scripts/build-desktop-artifact.ts --platform win --target nsis",
+    "typecheck": "vp run -r --concurrency-limit 2 typecheck",
+    "tc": "vp run -r --concurrency-limit 2 typecheck",
+    "lint": "vp lint --report-unused-disable-directives",
+    "knip": "knip --preprocessor ./scripts/knip-schemas.ts",
+    "knip:check": "knip --include files,dependencies --no-config-hints && knip --workspace apps/desktop --workspace apps/web --workspace packages/canvas --workspace packages/contracts --workspace packages/core --workspace packages/formats --workspace packages/shared --exports --preprocessor ./scripts/knip-schemas.ts --no-config-hints",
+    "test": "vp run -r test",
+    "test:e2e": "vp run -r test:e2e",
+    "fixtures": "node scripts/fixtures/index.ts",
+    "bench": "node scripts/bench/run.ts",
+    "bench:table": "node scripts/bench/table.ts",
+    "test:desktop-smoke": "vp run --filter @quipu/desktop smoke-test",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check",
+    "check": "vp fmt --check && vp lint --report-unused-disable-directives && vp run typecheck",
+    "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist apps/*/dist-electron packages/*/dist .vite-plus apps/*/.vite-plus packages/*/.vite-plus",
+    "demo": "node scripts/demo/cli.ts"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "catalog:",
+    "@shadcn/lint": "0.1.5",
+    "@types/node": "catalog:",
+    "knip": "6.34.0",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": "^24.13.1"
+  },
+  "packageManager": "pnpm@11.10.0"
+}

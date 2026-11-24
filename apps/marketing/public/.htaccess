@@ -1,0 +1,14 @@
+# Quipu cross-origin-isolation headers (COOP/COEP) and CSP for the site's docroot.
+# Open VSX answers every manifest, checksum, VSIX and icon URL with a 302 to
+# openvsx.eclipsecontent.org, so connect-src and img-src list both hosts.
+<IfModule mod_headers.c>
+  Header always set Cross-Origin-Opener-Policy "same-origin"
+  Header always set Cross-Origin-Embedder-Policy "require-corp"
+  Header always set Content-Security-Policy "default-src 'self'; connect-src 'self' https://open-vsx.org https://openvsx.eclipsecontent.org; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://open-vsx.org https://openvsx.eclipsecontent.org; worker-src 'self' blob:"
+  Header always set X-Content-Type-Options "nosniff"
+</IfModule>
+<IfModule mod_mime.c>
+  AddType application/wasm .wasm
+  AddType text/javascript .js .mjs
+  AddType application/octet-stream .AppImage .exe
+</IfModule>

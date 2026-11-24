@@ -1,0 +1,182 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { SITE } from "../lib/site";
+
+const { release, webAppPath } = SITE;
+
+const platforms =
+  release === null
+    ? []
+    : [
+        {
+          key: "linux",
+          name: "Linux",
+          arch: "x86_64",
+          format: "AppImage",
+          href: release.linuxAppImage,
+          steps: [
+            `Make the file executable: chmod +x Quipu-${release.version}-x86_64.AppImage`,
+            `Run it: ./Quipu-${release.version}-x86_64.AppImage`,
+          ],
+        },
+        {
+          key: "windows",
+          name: "Windows",
+          arch: "Windows 10, 11 (x64)",
+          format: ".exe installer",
+          href: release.windowsInstaller,
+          steps: [
+            `Run Quipu-${release.version}-x64.exe.`,
+            "If SmartScreen warns about an unknown publisher, choose More info, then Run anyway.",
+          ],
+        },
+      ];
+---
+
+<Layout
+  title="Download Quipu"
+  description="Download the Quipu desktop app for Linux or Windows."
+>
+  <div class="download-page">
+    <header class="download-head" data-rise>
+      <h1 class="heading display">Download Quipu</h1>
+      <p class="lede">
+        {
+          release !== null
+            ? `Version ${release.version}. The desktop app runs the same local-first canvas as the browser. No account, no telemetry.`
+            : "Downloads will appear here with the first release."
+        }
+      </p>
+    </header>
+
+    {
+      release !== null && (
+        <div class="platforms">
+          {platforms.map((platform, index) => (
+            <section
+              class="platform tile"
+              data-rise
+              style={`--d:${120 + index * 60}ms`}
+              aria-labelledby={`platform-${platform.key}`}
+            >
+              <h2 id={`platform-${platform.key}`} class="platform-name">
+                {platform.name}
+              </h2>
+              <a class="download-card" href={platform.href} download data-download={platform.key}>
+                <span class="card-arch">{platform.arch}</span>
+                <span class="card-format">{platform.format}</span>
+              </a>
+              <ol class="steps">
+                {platform.steps.map((step) => (
+                  <li>{step}</li>
+                ))}
+              </ol>
+            </section>
+          ))}
+        </div>
+      )
+    }
+
+    <p class="fineprint" data-rise style="--d:300ms">
+      {
+        release !== null
+          ? "These builds are unsigned, which is why the operating system asks you to confirm them. There is no macOS build."
+          : "The desktop app will ship as an AppImage for Linux (x86_64) and an installer for Windows 10 and 11 (x64). There is no macOS build."
+      }
+      {
+        webAppPath !== null && (
+          <>
+            {release !== null ? " Prefer not to install anything?" : " Until then,"}{" "}
+            <a href={webAppPath}>open Quipu in your browser</a>.
+          </>
+        )
+      }
+    </p>
+  </div>
+</Layout>
+
+<style>
+  .download-page {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 9vh 1.5rem 4rem;
+  }
+
+  .download-head {
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+
+  .heading {
+    font-size: clamp(2rem, 4.4vw, 3.25rem);
+  }
+
+  .lede {
+    margin-top: 14px;
+    color: var(--muted-foreground);
+    max-width: 34rem;
+  }
+
+  .platforms {
+    width: min(760px, 100%);
+    display: grid;
+    gap: 20px;
+  }
+
+  .platform {
+    padding: 24px;
+  }
+
+  .platform-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+
+  .download-card {
+    margin-top: 16px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--muted);
+    transition: border-color 0.18s ease;
+  }
+
+  .download-card:hover {
+    border-color: var(--primary);
+  }
+
+  .card-arch {
+    font-weight: 500;
+  }
+
+  .card-format {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted-foreground);
+  }
+
+  .steps {
+    margin: 16px 0 0 1.25rem;
+    color: var(--muted-foreground);
+    font-size: 0.92rem;
+  }
+
+  .fineprint {
+    margin-top: 2rem;
+    max-width: 34rem;
+    text-align: center;
+    font-size: 0.9rem;
+    color: var(--muted-foreground);
+  }
+
+  .fineprint a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+</style>

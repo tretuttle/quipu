@@ -1,0 +1,426 @@
+---
+import dmSansLatinUrl from "../assets/fonts/dm-sans-latin.woff2?url";
+import "../styles/fonts.css";
+import { DOWNLOAD_PAGE_PATH, SITE } from "../lib/site";
+
+interface Props {
+  title?: string;
+  description?: string;
+  pageClass?: string;
+}
+
+const {
+  title = "Quipu",
+  description = "Quipu is a local-first data canvas. Open any data file and see it as a map you can search, decode, edit, convert and draw on.",
+  pageClass,
+} = Astro.props;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Quipu" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <link
+      rel="preload"
+      href={dmSansLatinUrl}
+      as="font"
+      type="font/woff2"
+      crossorigin="anonymous"
+    />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <div class:list={["page", pageClass]}>
+      <nav class="nav">
+        <div class="nav-inner">
+          <a href="/" class="nav-brand" aria-label="Quipu home">
+            <svg class="nav-brand-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+              <path d="M14 14h36" stroke="currentColor" stroke-width="5" stroke-linecap="round" />
+              <path
+                d="M20 18v30M32 18v22M44 18v26"
+                stroke="currentColor"
+                stroke-width="5"
+                stroke-linecap="round"
+              />
+              <circle cx="20" cy="34" r="5" fill="var(--primary)" />
+              <circle cx="32" cy="30" r="5" fill="var(--primary)" />
+              <circle cx="44" cy="38" r="5" fill="var(--primary)" />
+            </svg>
+            <span class="nav-brand-name">Quipu</span>
+          </a>
+          <div class="nav-right">
+            {SITE.webAppPath !== null && <a class="nav-link" href={SITE.webAppPath}>Open the app</a>}
+            <a class="nav-cta" href={DOWNLOAD_PAGE_PATH}>Download</a>
+          </div>
+        </div>
+      </nav>
+
+      <main class="main">
+        <slot />
+      </main>
+
+      <footer class="footer">
+        <div class="footer-inner">
+          <div class="footer-brand">
+            <span>Quipu · a local-first data canvas · no accounts, no telemetry</span>
+          </div>
+          <div class="footer-links">
+            <a href="/#features">Features</a>
+            <a href="/#privacy">Privacy</a>
+            <a href={DOWNLOAD_PAGE_PATH}>Download</a>
+            {SITE.webAppPath !== null && <a href={SITE.webAppPath}>Open the app</a>}
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <script>
+      const nav = document.querySelector(".nav");
+      const onScroll = () => {
+        if (!nav) return;
+        if (window.scrollY > 12) nav.classList.add("is-scrolled");
+        else nav.classList.remove("is-scrolled");
+      };
+      window.addEventListener("scroll", onScroll, { passive: true });
+      onScroll();
+    </script>
+  </body>
+</html>
+
+<style is:global>
+  /* Token names and default values follow apps/web/src/index.css, so the site and
+     the app look like one product. The icon files are copies of the web app's. */
+  :root {
+    color-scheme: light dark;
+    --background: oklch(99.2% 0 0);
+    --foreground: #27272a;
+    --card: #fff;
+    --muted: #fafafa;
+    --muted-foreground: #71717a;
+    --border: #e4e4e7;
+    --border-strong: #d4d4d8;
+    --primary: oklch(0.488 0.217 264);
+    --primary-foreground: #fff;
+    --success: oklch(0.696 0.17 162);
+    --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #0a0a0a;
+      --foreground: #f5f5f5;
+      --card: color-mix(in srgb, #0a0a0a 97%, #fff);
+      --muted: rgb(255 255 255 / 3%);
+      --muted-foreground: #818181;
+      --border: rgb(255 255 255 / 6%);
+      --border-strong: rgb(255 255 255 / 14%);
+      --primary: oklch(0.571 0.21 264);
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+    overflow-x: hidden;
+    line-height: 1.5;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  img,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    font-weight: 500;
+  }
+
+  .display {
+    font-weight: 500;
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0 32px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 500;
+    font-size: 14px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    transition:
+      transform 0.18s ease,
+      background 0.18s ease,
+      border-color 0.18s ease,
+      color 0.18s ease;
+    white-space: nowrap;
+  }
+
+  .btn-primary {
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-weight: 600;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+  }
+
+  .btn-ghost {
+    color: var(--muted-foreground);
+    border: 1px solid var(--border-strong);
+  }
+
+  .btn-ghost:hover {
+    color: var(--foreground);
+  }
+
+  .btn-lg {
+    padding: 14px 22px;
+    font-size: 15px;
+    border-radius: 10px;
+  }
+
+  .tile {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Page-load sequence: [data-rise] plays once with delay --d. */
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  [data-rise] {
+    animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: var(--d, 0ms);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-rise] {
+      animation: none;
+    }
+  }
+</style>
+
+<style>
+  .page {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: clip;
+  }
+
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    background: color-mix(in srgb, var(--background) 75%, transparent);
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.3s ease;
+  }
+
+  .nav.is-scrolled {
+    border-bottom-color: var(--border);
+  }
+
+  .nav-inner {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 12px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+
+  .nav-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--foreground);
+  }
+
+  .nav-brand-mark {
+    height: 26px;
+    width: 26px;
+    flex: none;
+  }
+
+  .nav-brand-name {
+    font-size: 17px;
+    font-weight: 500;
+    letter-spacing: -0.025em;
+    line-height: 1;
+  }
+
+  .nav-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .nav-link {
+    padding: 0 10px;
+    color: var(--muted-foreground);
+    font-size: 13px;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    transition: color 0.18s ease;
+  }
+
+  .nav-link:hover {
+    color: var(--foreground);
+  }
+
+  .nav-cta {
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    color: var(--foreground);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: background 0.18s ease;
+  }
+
+  .nav-cta:hover {
+    background: var(--muted);
+  }
+
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .footer {
+    margin-top: auto;
+    border-top: 1px solid var(--border);
+    padding: 40px 0 32px;
+  }
+
+  .footer-inner {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0 32px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .footer-brand {
+    font-size: 13px;
+    color: var(--muted-foreground);
+  }
+
+  .footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 20px;
+  }
+
+  .footer-links a {
+    font-size: 13px;
+    color: var(--muted-foreground);
+    transition: color 0.2s ease;
+  }
+
+  .footer-links a:hover {
+    color: var(--foreground);
+  }
+
+  @media (max-width: 820px) {
+    .nav-inner,
+    .footer-inner {
+      padding-left: 20px;
+      padding-right: 20px;
+    }
+
+    .footer {
+      padding-bottom: max(32px, env(safe-area-inset-bottom));
+    }
+
+    .footer-inner {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 20px;
+    }
+  }
+</style>

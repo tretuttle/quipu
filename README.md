@@ -40,7 +40,8 @@ Prebuilt desktop binaries for Windows (`x64` installer) and Linux (`x86_64` AppI
 
 ### Requirements
 
-- Windows (`x64`) or Linux (`x86_64`) for desktop builds
+### Windows & Linux
+
 - Node.js `24.13.1+`
 - pnpm `11.10.0`
 

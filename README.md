@@ -38,36 +38,41 @@ Prebuilt desktop binaries for Windows (`x64` installer) and Linux (`x86_64` AppI
 
 ## Build from source
 
-Requires Node `24.13.1+` and `vite-plus@1.0.0` (both pinned in `mise.toml`, or install globally with `npm i -g vite-plus@1.0.0`).
+### Requirements
+
+- Windows (`x64`) or Linux (`x86_64`) for desktop builds (no macOS build yet).
+- **Node.js** `24.13.1+`
+- **pnpm** `11.10.0` (`corepack enable` picks this up automatically from `package.json`; `npm` is not supported because the workspace uses pnpm catalogs).
+
+Everything else (Vite+, Electron, and test tooling) installs locally via `pnpm install`.
 
 ```sh
 git clone https://github.com/tretuttle/quipu.git
 cd quipu
-mise trust && mise install   # optional if Node 24+ and vp are already installed
-vp i
+pnpm install
 ```
 
 Run locally:
 
 ```sh
-vp run dev:web       # browser app
-vp run dev:desktop   # Electron desktop app
+pnpm dev:web       # browser app
+pnpm dev:desktop   # Electron desktop app
 ```
 
 Build and package:
 
 ```sh
-vp run build                # build web, desktop, and marketing apps
-vp run dist:desktop:win     # Windows x64 NSIS installer (release/)
-vp run dist:desktop:linux   # Linux x86_64 AppImage (release/)
+pnpm build                # build web, desktop, and marketing apps
+pnpm dist:desktop:win     # Windows x64 NSIS installer (release/)
+pnpm dist:desktop:linux   # Linux x86_64 AppImage (release/)
 ```
 
 Tests and checks:
 
 ```sh
-vp run check                # format, lint, and typecheck
-vp run test                 # unit tests
-vp run test:e2e             # end-to-end tests
+pnpm check                # format, lint, and typecheck
+pnpm test                 # unit tests
+pnpm test:e2e             # end-to-end tests
 ```
 
 ## License

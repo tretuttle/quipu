@@ -38,7 +38,7 @@ Compare matches requests across two HAR captures by method, URL, and resource ty
 
 You can sketch request flows on standalone boards or draw shapes, notes, and node-bound arrows directly over a map, then export the map to PNG or SVG up to 8192 px. Quipu ships with Graphite, six named palettes, a 7:1 High Contrast theme, an OKLCH theme editor, and VS Code theme import.
 
-![Standalone diagram board in Quipu](docs/images/board.png)
+![Map annotations with sticky notes, frame, and arrows bound to HAR request cards](docs/images/board.png)
 
 ## How it works
 

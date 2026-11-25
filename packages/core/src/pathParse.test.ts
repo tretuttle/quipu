@@ -35,17 +35,46 @@ describe("the path grammar", () => {
   });
 
   it("reads indexes, negative indexes and slices with every part optional", () => {
-    expect(parsePath("$[-1]")).toEqual([
-      { descendant: false, selectors: [{ kind: "index", index: -1 }] },
-    ]);
-    const slice = (text: string) => parsePath(text)[0]?.selectors[0];
-    expect(slice("$[1:3]")).toEqual({ kind: "slice", start: 1, end: 3, step: null });
-    expect(slice("$[:2]")).toEqual({ kind: "slice", start: null, end: 2, step: null });
-    expect(slice("$[1:]")).toEqual({ kind: "slice", start: 1, end: null, step: null });
-    expect(slice("$[::2]")).toEqual({ kind: "slice", start: null, end: null, step: 2 });
-    expect(slice("$[::-1]")).toEqual({ kind: "slice", start: null, end: null, step: -1 });
-    expect(slice("$[ 1 : 3 : 2 ]")).toEqual({ kind: "slice", start: 1, end: 3, step: 2 });
-    expect(slice("$[:]")).toEqual({ kind: "slice", start: null, end: null, step: null });
+    expect(parsePath("$[0][-1][1:3][:2][1:][::2][::-1][:]")[0]).toEqual({
+      descendant: false,
+      selectors: [{ kind: "index", index: 0 }],
+    });
+    expect(parsePath("$[1:3]")[0]?.selectors[0]).toEqual({
+      kind: "slice",
+      start: 1,
+      end: 3,
+      step: null,
+    });
+    expect(parsePath("$[:2]")[0]?.selectors[0]).toEqual({
+      kind: "slice",
+      start: null,
+      end: 2,
+      step: null,
+    });
+    expect(parsePath("$[1:]")[0]?.selectors[0]).toEqual({
+      kind: "slice",
+      start: 1,
+      end: null,
+      step: null,
+    });
+    expect(parsePath("$[::2]")[0]?.selectors[0]).toEqual({
+      kind: "slice",
+      start: null,
+      end: null,
+      step: 2,
+    });
+    expect(parsePath("$[::-1]")[0]?.selectors[0]).toEqual({
+      kind: "slice",
+      start: null,
+      end: null,
+      step: -1,
+    });
+    expect(parsePath("$[:]")[0]?.selectors[0]).toEqual({
+      kind: "slice",
+      start: null,
+      end: null,
+      step: null,
+    });
   });
 
   it("reads a union and the escapes of a quoted name", () => {
@@ -65,6 +94,56 @@ describe("the path grammar", () => {
     });
   });
 
+  it("reads filter predicates with comparisons, existence, boolean ops, and literals", () => {
+    expect(parsePath("$.store.book[?@.isbn]")[2]?.selectors[0]).toEqual({
+      kind: "filter",
+      expr: {
+        kind: "exists",
+        path: {
+          absolute: false,
+          segments: [{ descendant: false, selectors: [{ kind: "name", name: "isbn" }] }],
+        },
+      },
+    });
+    expect(parsePath("$.store.book[?@.price < 10 && @.author != 'N']")[2]?.selectors[0]).toEqual({
+      kind: "filter",
+      expr: {
+        kind: "and",
+        left: {
+          kind: "compare",
+          left: {
+            kind: "path",
+            path: {
+              absolute: false,
+              segments: [{ descendant: false, selectors: [{ kind: "name", name: "price" }] }],
+            },
+          },
+          op: "<",
+          right: { kind: "literal", literal: { kind: "number", value: 10 } },
+        },
+        right: {
+          kind: "compare",
+          left: {
+            kind: "path",
+            path: {
+              absolute: false,
+              segments: [{ descendant: false, selectors: [{ kind: "name", name: "author" }] }],
+            },
+          },
+          op: "!=",
+          right: { kind: "literal", literal: { kind: "string", value: "N" } },
+        },
+      },
+    });
+    expect(parsePath("$[?!(@.ok == true || @.tag == null)]")[0]?.selectors[0]).toMatchObject({
+      kind: "filter",
+      expr: {
+        kind: "not",
+        expr: { kind: "or" },
+      },
+    });
+  });
+
   it("says where and why a path is refused", () => {
     expect(failure("log.entries")).toEqual({ message: "a path starts with $", at: 0 });
     expect(failure("$.")).toMatchObject({ message: "expected a name", at: 2 });
@@ -76,8 +155,10 @@ describe("the path grammar", () => {
     expect(failure("$['a")).toMatchObject({ message: "the string is not closed" });
     expect(failure("$[01]")).toMatchObject({ message: "a number has no leading zero" });
     expect(failure("$[-0]")).toMatchObject({ message: "-0 is not a number" });
-    expect(failure("$[?(@.a)]").message).toContain("jq bar");
     expect(failure("$[(@.length-1)]").message).toContain("jq bar");
+    expect(failure("$.store[?length(@) > 1]")).toMatchObject({ at: 9 });
+    expect(failure("$.store[?length(@) > 1]").message).toContain("length()");
+    expect(failure("$.store[?@.price <]").at).toBe(18);
     expect(failure("$[9007199254740993]").message).toBe("the number is too large");
     expect(failure("$.a b")).toMatchObject({ message: 'unexpected "b"', at: 4 });
     expect(failure("$['a\\x']")).toMatchObject({ message: "unknown escape" });

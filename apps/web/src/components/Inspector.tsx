@@ -7,8 +7,11 @@ import type {
 } from "@quipu/contracts/engine";
 import { startTransition, useEffect, useState, useSyncExternalStore } from "react";
 
+import type { DeepHitAnnotation } from "@quipu/contracts/deepSearch";
 import { nodeBlocker, startNodeEdit, useNodeEditor } from "~/documents/documentEdits";
+import { useDeepHitStore } from "~/documents/hitFilter";
 import { useDocumentSession } from "~/documents/documentSession";
+import { runShellCommand } from "~/shellCommands";
 import {
   type DecodedEntry,
   type Inspection,
@@ -46,6 +49,9 @@ export function Inspector({
   readonly source: InspectSource;
 }) {
   const selection = useSyncExternalStore(tree.subscribe, tree.selection);
+  const deepHit = useDeepHitStore((state) =>
+    selection !== null ? state.annotationForRange(selection.node.span) : null,
+  );
   const [load, setLoad] = useState<Load | null>(null);
   const session = useDocumentSession((state) => state.session);
   const document =
@@ -87,6 +93,8 @@ export function Inspector({
   // What cannot be edited shows no edit action; the commands say why.
   const canEditValue = nodeBlocker(document, target, "value") === null;
   const canRename = nodeBlocker(document, target, "key") === null;
+  const canTrace =
+    document !== null && selection.node.kind !== "object" && selection.node.kind !== "array";
   const editingHere =
     editing !== null &&
     editing.ref.tapeId === selection.node.ref.tapeId &&
@@ -119,8 +127,18 @@ export function Inspector({
               {selection.node.childCount} {selection.node.kind === "object" ? "keys" : "items"}
             </span>
           ) : null}
-          {canEditValue || canRename ? (
+          {canEditValue || canRename || canTrace ? (
             <span className="ms-auto flex items-center gap-1">
+              {canTrace ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  data-inspector-trace=""
+                  onClick={() => runShellCommand("search.traceValue")}
+                >
+                  Trace
+                </Button>
+              ) : null}
               {canRename ? (
                 <Button
                   size="xs"
@@ -167,6 +185,12 @@ export function Inspector({
           inspection={load.inspection}
           source={source}
           unit={selection.node.kind === "object" ? "key" : "item"}
+          deepHit={deepHit}
+          canDecode={
+            selection.node.kind === "string" &&
+            (selection.detections.length > 0 || deepHit !== null)
+          }
+          onDecode={() => void tree.setDecoded(selection.id, true)}
         />
       )}
     </div>
@@ -226,14 +250,35 @@ function InspectionView({
   inspection,
   source,
   unit,
+  deepHit,
+  canDecode,
+  onDecode,
 }: {
   readonly inspection: Inspection;
   readonly source: InspectSource;
   readonly unit: "key" | "item";
+  readonly deepHit: DeepHitAnnotation | null;
+  readonly canDecode: boolean;
+  readonly onDecode: () => void;
 }) {
   const { value, decodes, frames, members } = inspection;
   return (
     <>
+      {deepHit !== null && deepHit.decodeChain.length > 0 ? (
+        <Section title="Decode chain">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline" size="sm" data-decode-chain="">
+              {deepHit.decodeChain.join(" › ")}
+            </Badge>
+            {canDecode ? (
+              <Button size="xs" variant="outline" onClick={onDecode}>
+                Decode
+              </Button>
+            ) : null}
+          </div>
+          {deepHit.snippet !== "" ? <Mono text={deepHit.snippet} /> : null}
+        </Section>
+      ) : null}
       {value !== null ? (
         <Section
           title="Value"

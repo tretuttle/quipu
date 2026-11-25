@@ -360,6 +360,7 @@ export class MapModel {
   /** Bumped by every start and stop: work from an earlier run stops at the next await. */
   private generation = 0;
   private unsubscribe: (() => void) | null = null;
+  private matchFilter: ReadonlySet<string> | null = null;
   version = 0;
 
   constructor(
@@ -451,6 +452,16 @@ export class MapModel {
   };
 
   getSnapshot = () => this.snapshot;
+
+  /** Filters the map to matching nodes + ancestors, or `null` to restore all nodes and rows. */
+  setMatchFilter(matchedIds: ReadonlySet<string> | null): void {
+    this.matchFilter = matchedIds;
+    if (this.active) this.rebuild();
+  }
+
+  getMatchFilter(): ReadonlySet<string> | null {
+    return this.matchFilter;
+  }
 
   /**
    * Where something attached to map node `id` (an arrow end, a note) is drawn:
@@ -1042,21 +1053,27 @@ export class MapModel {
         });
       }
     }
+    const finalGraph =
+      this.matchFilter === null
+        ? { nodes, byId, childrenOf, locations, rowLocations }
+        : filterMapGraph(nodes, this.matchFilter, (title, subtitle, filteredRows, preview) =>
+            sizeNode(title, subtitle, filteredRows, preview, this.charWidth),
+          );
     this.version += 1;
     this.snapshot = {
       ...this.snapshot,
       version: this.version,
-      nodes,
-      byId,
-      childrenOf,
+      nodes: finalGraph.nodes,
+      byId: finalGraph.byId,
+      childrenOf: finalGraph.childrenOf,
       grouping:
         this.har !== null
           ? { loaded: this.har.loaded, total: this.har.entriesTotal }
           : this.groupingPending()
             ? { loaded: 0, total: null }
             : null,
-      locations,
-      rowLocations,
+      locations: finalGraph.locations,
+      rowLocations: finalGraph.rowLocations,
       charWidth: this.charWidth,
     };
     this.emit();
@@ -1564,4 +1581,88 @@ export class MapModel {
       expanded: rows.some((row) => row.expanded),
     };
   }
+}
+
+function filterMapGraph(
+  nodes: ReadonlyArray<MapNode>,
+  matchedIds: ReadonlySet<string>,
+  measure: (
+    title: string,
+    subtitle: string,
+    rows: ReadonlyArray<MapRow>,
+    preview: MapPreview | null,
+  ) => { readonly width: number; readonly height: number },
+): {
+  readonly nodes: ReadonlyArray<MapNode>;
+  readonly byId: ReadonlyMap<string, MapNode>;
+  readonly childrenOf: ReadonlyMap<string, ReadonlyArray<string>>;
+  readonly locations: ReadonlyMap<string, MapLocation>;
+  readonly rowLocations: ReadonlyMap<string, MapLocation>;
+} {
+  const keptIds = new Set<string>();
+  const rowMatches = (row: MapRow) =>
+    (row.treeId !== null && matchedIds.has(row.treeId)) ||
+    (row.childId !== null && keptIds.has(row.childId));
+
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i]!;
+    const selfHit =
+      (node.treeId !== null && matchedIds.has(node.treeId)) || matchedIds.has(node.id);
+    if (selfHit || node.rows.some(rowMatches)) keptIds.add(node.id);
+  }
+
+  const keptNodes: MapNode[] = [];
+  const byId = new Map<string, MapNode>();
+  const childrenOf = new Map<string, string[]>();
+  const locations = new Map<string, MapLocation>();
+  const rowLocations = new Map<string, MapLocation>();
+  const siblingCounts = new Map<string | null, number>();
+
+  for (const node of nodes) {
+    if (!keptIds.has(node.id)) continue;
+    siblingCounts.set(node.parentId, (siblingCounts.get(node.parentId) ?? 0) + 1);
+  }
+  const siblingSeen = new Map<string | null, number>();
+
+  for (const node of nodes) {
+    if (!keptIds.has(node.id)) continue;
+    const filteredRows = node.rows.filter(rowMatches);
+    const { width, height } = measure(node.title, node.subtitle, filteredRows, node.preview);
+    let anchor = node.anchor;
+    if (node.parentId !== null) {
+      const parent = byId.get(node.parentId);
+      if (parent !== undefined) {
+        const idx = parent.rows.findIndex((r) => r.childId === node.id);
+        if (idx >= 0) anchor = MAP_HEADER_HEIGHT + idx * MAP_ROW_HEIGHT;
+      }
+    }
+    const position = (siblingSeen.get(node.parentId) ?? 0) + 1;
+    siblingSeen.set(node.parentId, position);
+    const updated: MapNode = {
+      ...node,
+      rows: filteredRows,
+      width,
+      height,
+      anchor,
+      position,
+      setSize: siblingCounts.get(node.parentId) ?? 1,
+    };
+    keptNodes.push(updated);
+    byId.set(updated.id, updated);
+    if (updated.parentId !== null) {
+      const list = childrenOf.get(updated.parentId) ?? [];
+      list.push(updated.id);
+      childrenOf.set(updated.parentId, list);
+    }
+    childrenOf.set(updated.id, []);
+    if (updated.treeId !== null)
+      locations.set(updated.treeId, { nodeId: updated.id, rowIndex: null });
+    updated.rows.forEach((row, rowIndex) => {
+      if (row.treeId !== null) rowLocations.set(row.treeId, { nodeId: updated.id, rowIndex });
+      if (row.treeId !== null && row.childId === null) {
+        locations.set(row.treeId, { nodeId: updated.id, rowIndex });
+      }
+    });
+  }
+  return { nodes: keptNodes, byId, childrenOf, locations, rowLocations };
 }

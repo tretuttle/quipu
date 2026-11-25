@@ -273,7 +273,7 @@ describe("the structural index and shiki", () => {
     expect(colorOf("-2.5e+3", 0), `${label} number`).toBe(cssColor(table.number));
   }
 
-  it("paint every character the same under all 7 built-in palettes", async () => {
+  it("paint every character the same under all 8 built-in palettes", async () => {
     await withPage(async (page) => {
       await openEquality(page);
       const palettes = [{ id: "system", label: "Graphite", syntax: undefined }].concat(
@@ -283,7 +283,7 @@ describe("the structural index and shiki", () => {
           syntax: theme.syntax,
         })),
       );
-      expect(palettes).toHaveLength(7);
+      expect(palettes).toHaveLength(8);
       for (const palette of palettes) {
         for (const appearance of ["light", "dark"] as const) {
           await page.evaluate(

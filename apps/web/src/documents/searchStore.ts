@@ -1,3 +1,4 @@
+import type { JqElementResult } from "@quipu/contracts/elementMap";
 import type {
   ByteRange,
   JqResult,
@@ -9,8 +10,11 @@ import type {
 import { JQ_DEFAULT_TIMEOUT_MS } from "@quipu/contracts/engine";
 import { create } from "zustand";
 
+import { resolveStorage } from "../lib/storage.ts";
 import { type OpenDocument, useDocumentSession } from "./documentSession.ts";
+import { useDeepHitStore, useMatchFilterStore } from "./hitFilter.ts";
 import { type DocumentSelection, narrowedSelection, useSelectionStore } from "./selectionStore.ts";
+import { nodeId } from "./treeModel.ts";
 import type { SearchedQuery } from "./treePaint.ts";
 
 export type QueryPanel = "find" | "path" | "jq";
@@ -40,6 +44,30 @@ export interface CurrentHit {
 
 type Phase = "idle" | "searching" | "done" | "error";
 
+const DEEP_DECODE_STORAGE_KEY = "quipu:search:deep-decode";
+
+const readStoredDeepDecode = (): boolean => {
+  try {
+    const raw = resolveStorage(
+      typeof window !== "undefined" ? window.localStorage : undefined,
+    ).getItem(DEEP_DECODE_STORAGE_KEY);
+    return raw === "1";
+  } catch {
+    return false;
+  }
+};
+
+const writeStoredDeepDecode = (value: boolean): void => {
+  try {
+    resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined).setItem(
+      DEEP_DECODE_STORAGE_KEY,
+      value ? "1" : "0",
+    );
+  } catch {
+    // Ignore storage failures in restricted contexts.
+  }
+};
+
 interface SearchState {
   /** The open query bar; null when closed. */
   readonly panel: QueryPanel | null;
@@ -49,6 +77,7 @@ interface SearchState {
   readonly text: string;
   readonly mode: SearchMode;
   readonly caseSensitive: boolean;
+  readonly deepDecode: boolean;
   readonly phase: Phase;
   readonly summary: SearchSummary | null;
   /** The query the last search was started for; the bar searches again only when it differs. */
@@ -71,19 +100,25 @@ interface SearchState {
   readonly jqScope: JqScope | null;
   readonly jqPhase: Phase;
   readonly jqResult: JqResult | null;
+  readonly jqElementResult: JqElementResult | null;
+  readonly jqSuggestedPath: string | null;
   readonly jqError: string | null;
   readonly open: (panel: QueryPanel) => void;
   readonly close: () => void;
   readonly setText: (text: string) => void;
   readonly setMode: (mode: SearchMode) => void;
   readonly setCaseSensitive: (caseSensitive: boolean) => void;
+  readonly setDeepDecode: (deepDecode: boolean) => void;
   readonly run: () => Promise<void>;
   readonly step: (delta: 1 | -1) => Promise<void>;
+  readonly refreshMatchFilter: () => Promise<void>;
   readonly setPathText: (text: string) => void;
   readonly runPath: () => Promise<void>;
   readonly setJqProgram: (program: string) => void;
   readonly setJqScope: (scope: JqScope) => void;
   readonly runJq: () => Promise<void>;
+  readonly runJqElement: (path?: string) => Promise<void>;
+  readonly loadJqSuggestion: (documentId: number, tapeId: number, token: number) => Promise<void>;
   /** The document's bytes changed: hits and results are for the old bytes, so they are found again. */
   readonly documentChanged: () => Promise<void>;
 }
@@ -93,7 +128,9 @@ export const searchKey = (
   mode: SearchMode,
   caseSensitive: boolean,
   text: string,
-) => `${documentId ?? ""}\u0000${mode}\u0000${caseSensitive ? 1 : 0}\u0000${text}`;
+  deepDecode = false,
+) =>
+  `${documentId ?? ""}\u0000${mode}\u0000${caseSensitive ? 1 : 0}\u0000${deepDecode ? 1 : 0}\u0000${text}`;
 
 /** Results listed for a path query. */
 const PATH_RESULT_LIMIT = 1000;
@@ -107,6 +144,7 @@ let searchGeneration = 0;
 let pathGeneration = 0;
 let jqGeneration = 0;
 let stepRevision = 0;
+let stepTicket = 0;
 /** The hit the last step moved to, known at once so two quick steps go two hits on. */
 let cursor: number | null = null;
 
@@ -118,6 +156,61 @@ const message = (error: unknown, fallback: string) => {
   return fallback;
 };
 
+const MATCH_FILTER_HIT_LIMIT = 1000;
+const MATCH_FILTER_NODE_LIMIT = 256;
+const MATCH_FILTER_REVEAL_LIMIT = 64;
+
+async function syncMatchFilterForSummary(
+  document: OpenDocument,
+  summary: SearchSummary | null,
+  generation: number,
+): Promise<void> {
+  const filter = useMatchFilterStore.getState();
+  if (!filter.enabled) return;
+  if (summary === null || summary.count === 0) {
+    filter.setHitRanges([]);
+    filter.setMatchedIds(new Set());
+    return;
+  }
+  try {
+    const page = await document.queries.hits(
+      summary.searchId,
+      0,
+      document.size,
+      MATCH_FILTER_HIT_LIMIT,
+    );
+    if (generation !== searchGeneration) return;
+    useMatchFilterStore.getState().setHitRanges(page.ranges);
+
+    const resolveCount = Math.min(page.ranges.length, MATCH_FILTER_NODE_LIMIT);
+    const matchedIds = new Set<string>();
+    const pathsToReveal: Array<ReadonlyArray<PathStep>> = [];
+    const batchSize = 16;
+    for (let i = 0; i < resolveCount; i += batchSize) {
+      const slice = page.ranges.slice(i, i + batchSize);
+      const foundList = await Promise.all(
+        slice.map((r) => document.source.nodeAt(r.start).catch(() => null)),
+      );
+      if (generation !== searchGeneration) return;
+      for (const found of foundList) {
+        if (found === null || found.path.length === 0) continue;
+        const innermost = found.path[found.path.length - 1]!;
+        matchedIds.add(nodeId(innermost.node.ref));
+        if (pathsToReveal.length < MATCH_FILTER_REVEAL_LIMIT) {
+          pathsToReveal.push(found.path);
+        }
+      }
+    }
+    if (document.tree !== null && pathsToReveal.length > 0) {
+      await Promise.all(pathsToReveal.map((path) => document.tree!.reveal(path)));
+      if (generation !== searchGeneration) return;
+    }
+    useMatchFilterStore.getState().setMatchedIds(matchedIds);
+  } catch {
+    // Keep existing tree/table intact if hit sync fails mid-edit.
+  }
+}
+
 const initial = {
   panel: null,
   focusRevision: 0,
@@ -125,6 +218,7 @@ const initial = {
   text: "",
   mode: "literal" as SearchMode,
   caseSensitive: false,
+  deepDecode: readStoredDeepDecode(),
   phase: "idle" as Phase,
   summary: null,
   searched: null,
@@ -140,6 +234,8 @@ const initial = {
   jqScope: null as JqScope | null,
   jqPhase: "idle" as Phase,
   jqResult: null,
+  jqElementResult: null as JqElementResult | null,
+  jqSuggestedPath: null as string | null,
   jqError: null,
 };
 
@@ -160,10 +256,15 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   close: () => {
     const { summary, documentId } = get();
     searchGeneration++;
+    stepTicket++;
+    stepTicket++;
+    stepTicket++;
     const document = openDocument();
     if (summary !== null && document !== null && document.documentId === documentId) {
       void document.queries.closeSearch(summary.searchId).catch(() => null);
     }
+    useDeepHitStore.getState().clear();
+    useMatchFilterStore.getState().clear();
     set({
       panel: null,
       phase: "idle",
@@ -178,6 +279,9 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   setText: (text) => {
     set({ text });
     if (text === "") {
+      useDeepHitStore.getState().clear();
+      useMatchFilterStore.getState().setMatchedIds(new Set());
+      useMatchFilterStore.getState().setHitRanges([]);
       set({
         phase: "idle",
         summary: null,
@@ -188,14 +292,21 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         current: null,
       });
       searchGeneration++;
+      stepTicket++;
+      stepTicket++;
     }
   },
   setMode: (mode) => set({ mode }),
   setCaseSensitive: (caseSensitive) => set({ caseSensitive }),
+  setDeepDecode: (deepDecode) => {
+    writeStoredDeepDecode(deepDecode);
+    set({ deepDecode });
+  },
   run: async () => {
     const document = openDocument();
-    const { text, mode, caseSensitive, summary: previous } = get();
+    const { text, mode, caseSensitive, deepDecode, summary: previous } = get();
     const mine = ++searchGeneration;
+    stepTicket++;
     cursor = null;
     if (document === null || text === "") return;
     if (previous !== null) void document.queries.closeSearch(previous.searchId).catch(() => null);
@@ -203,13 +314,38 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       phase: "searching",
       error: null,
       documentId: document.documentId,
-      searched: searchKey(document.documentId, mode, caseSensitive, text),
+      searched: searchKey(document.documentId, mode, caseSensitive, text, deepDecode),
     });
     try {
-      const summary = await document.queries.search({ mode, text, caseSensitive });
-      if (mine !== searchGeneration) {
-        void document.queries.closeSearch(summary.searchId).catch(() => null);
-        return;
+      let summary: SearchSummary;
+      if (deepDecode && document.queries.deepSearch !== undefined) {
+        const deep = await document.queries.deepSearch({
+          mode,
+          text,
+          caseSensitive,
+          deep: true,
+        });
+        if (mine !== searchGeneration) {
+          void document.queries.closeSearch(deep.searchId).catch(() => null);
+          return;
+        }
+        useDeepHitStore.getState().setAnnotations(deep.searchId, deep.annotations);
+        summary = {
+          searchId: deep.searchId,
+          count: deep.count,
+          retained: deep.retained,
+          retainedUntil: deep.retainedUntil,
+          skipped: deep.skipped,
+          limited: deep.limited,
+          status: deep.status,
+        };
+      } else {
+        useDeepHitStore.getState().clear();
+        summary = await document.queries.search({ mode, text, caseSensitive });
+        if (mine !== searchGeneration) {
+          void document.queries.closeSearch(summary.searchId).catch(() => null);
+          return;
+        }
       }
       // Stepping starts after a node the user picked in this document; otherwise at the first hit.
       const placed = anchor !== null && anchor.documentId === document.documentId ? anchor : null;
@@ -220,6 +356,9 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         query: { text, mode, caseSensitive },
         startedFrom: placed === null ? "start" : "selection",
       });
+      if (useMatchFilterStore.getState().enabled) {
+        void syncMatchFilterForSummary(document, summary, mine);
+      }
       if (summary.count > 0 && summary.retained > 0) {
         const from = placed === null ? 0 : placed.offset;
         const index = await document.queries.seek(summary.searchId, from);
@@ -228,6 +367,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       }
     } catch (error) {
       if (mine !== searchGeneration) return;
+      useDeepHitStore.getState().clear();
       set({
         phase: "error",
         summary: null,
@@ -235,6 +375,11 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         error: message(error, "The search failed."),
       });
     }
+  },
+  refreshMatchFilter: async () => {
+    const document = openDocument();
+    if (document === null) return;
+    await syncMatchFilterForSummary(document, get().summary, searchGeneration);
   },
   step: async (delta) => {
     const document = openDocument();
@@ -276,35 +421,135 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       scope === "selection" && selected !== null
         ? selected.ref
         : { documentId: document.documentId, tapeId: 0, token: 0 };
-    set({ jqPhase: "searching", jqError: null });
+    set({ jqPhase: "searching", jqError: null, jqElementResult: null });
     try {
       const jqResult = await document.queries.jq(target, get().jqProgram, JQ_DEFAULT_TIMEOUT_MS);
       if (mine !== jqGeneration) return;
-      set({ jqPhase: "done", jqResult });
+      set({ jqPhase: "done", jqResult, jqElementResult: null });
     } catch (error) {
       if (mine !== jqGeneration) return;
-      set({ jqPhase: "error", jqResult: null, jqError: message(error, "jq failed.") });
+      const suggested =
+        typeof error === "object" &&
+        error !== null &&
+        "suggestedPath" in error &&
+        typeof (error as { suggestedPath: unknown }).suggestedPath === "string"
+          ? (error as { suggestedPath: string }).suggestedPath
+          : get().jqSuggestedPath;
+      set({
+        jqPhase: "error",
+        jqResult: null,
+        jqElementResult: null,
+        jqSuggestedPath: suggested,
+        jqError: message(error, "jq failed."),
+      });
     }
   },
+  runJqElement: async (explicitPath) => {
+    const document = openDocument();
+    const mine = ++jqGeneration;
+    if (document === null || document.queries.jqElement === undefined) return;
+    const selected = narrowedSelection(useSelectionStore.getState().selection, document.documentId);
+    const scope = jqScopeOf(get().jqScope, selected !== null);
+    const target =
+      scope === "selection" && selected !== null
+        ? selected.ref
+        : { documentId: document.documentId, tapeId: 0, token: 0 };
+    const path = explicitPath ?? get().jqSuggestedPath ?? undefined;
+    set({ jqPhase: "searching", jqError: null });
+    try {
+      const res = await document.queries.jqElement(
+        target,
+        path,
+        get().jqProgram,
+        Math.max(JQ_DEFAULT_TIMEOUT_MS, 15_000),
+      );
+      if (mine !== jqGeneration) return;
+      set({
+        jqPhase: "done",
+        jqElementResult: res,
+        jqResult: {
+          status: res.status === "error" ? "error" : "ok",
+          output: res.output,
+          truncated: res.truncated,
+          message: res.message,
+          inputBytes: res.inputBytes,
+        },
+        jqSuggestedPath: res.path,
+      });
+    } catch (error) {
+      if (mine !== jqGeneration) return;
+      set({
+        jqPhase: "error",
+        jqResult: null,
+        jqElementResult: null,
+        jqError: message(error, "jq element run failed."),
+      });
+    }
+  },
+  loadJqSuggestion: async (documentId, tapeId, token) => {
+    const document = openDocument();
+    if (
+      document === null ||
+      document.documentId !== documentId ||
+      document.queries.jqSuggestPath === undefined
+    ) {
+      return;
+    }
+    const suggested = await document.queries
+      .jqSuggestPath({ documentId, tapeId, token })
+      .catch(() => null);
+    if (openDocument()?.documentId !== documentId) return;
+    set({ jqSuggestedPath: suggested?.path ?? null });
+  },
   documentChanged: async () => {
-    const { summary, pathResult, jqResult } = get();
+    const { summary, pathResult, jqResult, jqElementResult } = get();
     if (pathResult !== null) void get().runPath();
-    if (jqResult !== null) void get().runJq();
+    if (jqElementResult !== null) void get().runJqElement();
+    else if (jqResult !== null) void get().runJq();
     const document = openDocument();
     if (summary === null || document === null || document.documentId !== get().documentId) return;
     // Found again in place: the hits change, the selection the edit made stays.
-    const { text, mode, caseSensitive } = get();
+    const { text, mode, caseSensitive, deepDecode } = get();
     const mine = ++searchGeneration;
+    stepTicket++;
     cursor = null;
     void document.queries.closeSearch(summary.searchId).catch(() => null);
     set({ phase: "searching", error: null, current: null });
     try {
-      const next = await document.queries.search({ mode, text, caseSensitive });
-      if (mine !== searchGeneration) {
-        void document.queries.closeSearch(next.searchId).catch(() => null);
-        return;
+      let next: SearchSummary;
+      if (deepDecode && document.queries.deepSearch !== undefined) {
+        const deep = await document.queries.deepSearch({
+          mode,
+          text,
+          caseSensitive,
+          deep: true,
+        });
+        if (mine !== searchGeneration) {
+          void document.queries.closeSearch(deep.searchId).catch(() => null);
+          return;
+        }
+        useDeepHitStore.getState().setAnnotations(deep.searchId, deep.annotations);
+        next = {
+          searchId: deep.searchId,
+          count: deep.count,
+          retained: deep.retained,
+          retainedUntil: deep.retainedUntil,
+          skipped: deep.skipped,
+          limited: deep.limited,
+          status: deep.status,
+        };
+      } else {
+        useDeepHitStore.getState().clear();
+        next = await document.queries.search({ mode, text, caseSensitive });
+        if (mine !== searchGeneration) {
+          void document.queries.closeSearch(next.searchId).catch(() => null);
+          return;
+        }
       }
       set({ phase: "done", summary: next, query: { text, mode, caseSensitive } });
+      if (useMatchFilterStore.getState().enabled) {
+        void syncMatchFilterForSummary(document, next, mine);
+      }
     } catch (error) {
       if (mine !== searchGeneration) return;
       set({ phase: "error", summary: null, error: message(error, "The search failed.") });
@@ -339,10 +584,11 @@ async function goTo(
   index: number,
   generation: number,
 ): Promise<void> {
+  const ticket = ++stepTicket;
   const hit = await document.queries.hit(summary.searchId, index);
-  if (hit === null || generation !== searchGeneration) return;
+  if (hit === null || generation !== searchGeneration || ticket !== stepTicket) return;
   const found = await document.source.nodeAt(hit.range.start);
-  if (generation !== searchGeneration) return;
+  if (generation !== searchGeneration || ticket !== stepTicket) return;
   cursor = hit.index;
   useSearchStore.setState({
     current: { index: hit.index, range: hit.range, path: found.path, revision: ++stepRevision },
@@ -367,6 +613,7 @@ useDocumentSession.subscribe((state) => {
   lastDocument = id;
   anchor = null;
   searchGeneration++;
+  stepTicket++;
   pathGeneration++;
   jqGeneration++;
   useSearchStore.setState({
@@ -375,6 +622,7 @@ useDocumentSession.subscribe((state) => {
     text: useSearchStore.getState().text,
     mode: useSearchStore.getState().mode,
     caseSensitive: useSearchStore.getState().caseSensitive,
+    deepDecode: useSearchStore.getState().deepDecode,
     jqScope: useSearchStore.getState().jqScope,
     documentId: id,
   });

@@ -51,7 +51,15 @@ describe("palettes", () => {
       painted.set("Quipu", await paintedSurfaces(page));
 
       let previous = painted.get("Quipu")!;
-      for (const label of ["Graphite", "Orchid", "Grove", "Ocean", "Ember", "Iris"]) {
+      for (const label of [
+        "Graphite",
+        "Orchid",
+        "Grove",
+        "Ocean",
+        "Ember",
+        "High Contrast",
+        "Iris",
+      ]) {
         await page.getByRole("button", { name: new RegExp(`^Use ${label} theme`) }).click();
         await page.waitForFunction((from) => {
           const paint = (selector: string) => {
@@ -121,7 +129,7 @@ describe("theme files", () => {
       expect(await alert.textContent()).toContain(
         "This theme file uses an unsupported version. Expected 1.",
       );
-      expect(await page.locator("[data-theme-library-card]").count()).toBe(7);
+      expect(await page.locator("[data-theme-library-card]").count()).toBe(8);
     }, APPEARANCE);
   });
 

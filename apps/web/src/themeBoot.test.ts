@@ -12,6 +12,7 @@ import {
   ORCHID_THEME,
   EMBER_THEME,
   GROVE_THEME,
+  HIGH_CONTRAST_THEME,
   IRIS_THEME,
   OCEAN_THEME,
   QUIPU_THEME,
@@ -360,6 +361,7 @@ describe("index.html boot script", () => {
       EMBER_THEME,
       IRIS_THEME,
       QUIPU_THEME,
+      HIGH_CONTRAST_THEME,
     ]) {
       // The boot script resolves every built-in from a light base appearance.
       expect(theme.appearance).toBe("light");

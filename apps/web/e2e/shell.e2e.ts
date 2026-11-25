@@ -312,7 +312,7 @@ describe("settings", () => {
 });
 
 describe("right panel", () => {
-  it("switches between its two tabs and shows each one's empty state", async () => {
+  it("switches between its tabs and shows each one's empty state", async () => {
     await withPage(async (page) => {
       await page.getByRole("button", { name: "Toggle right panel" }).click();
       await page.getByRole("tab", { name: "Inspector", selected: true }).waitFor();
@@ -320,13 +320,22 @@ describe("right panel", () => {
 
       for (const [tab, message] of [
         ["Source", "No source to show"],
+        ["Trace", "No trace results"],
+        ["Schema", "No schema inferred"],
+        ["Problems", "No validation run"],
         ["Inspector", "Nothing to inspect"],
       ] as const) {
         await page.getByRole("tab", { name: tab }).click();
         await page.getByRole("tab", { name: tab, selected: true }).waitFor();
         await page.getByText(message).waitFor();
       }
-      expect(await page.getByRole("tab").allTextContents()).toEqual(["Inspector", "Source"]);
+      expect(await page.getByRole("tab").allTextContents()).toEqual([
+        "Inspector",
+        "Source",
+        "Trace",
+        "Schema",
+        "Problems",
+      ]);
     });
   });
 
@@ -386,7 +395,13 @@ describe("storage", () => {
 
         // The dialog has no Enter handler: Enter presses the focused button, and
         // Cancel is the first one, so it closes the dialog without confirming.
-        await dialog.getByRole("button", { name: "Cancel" }).waitFor();
+        const cancel = dialog.getByRole("button", { name: "Cancel" });
+        await cancel.waitFor();
+        await page.waitForFunction(
+          () => document.activeElement?.textContent?.trim() === "Cancel",
+          undefined,
+          { timeout: 5_000 },
+        );
         await page.keyboard.press("Enter");
         await dialog.waitFor({ state: "hidden" });
         expect(await page.evaluate(() => window.localStorage.getItem("quipu:probe"))).toBe("kept");

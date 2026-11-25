@@ -34,7 +34,9 @@ import {
 import { useDocumentSession } from "../documents/documentSession";
 import { useDocumentView } from "../documentViewStore";
 import { useTheme } from "../hooks/useTheme";
+import { useSchemaStore } from "../documents/schemaStore";
 import { useSearchStore } from "../documents/searchStore";
+import { traceSelectedScalar } from "../documents/traceActions";
 import { useExportDialog } from "../documents/exportDialogStore";
 import { openWithDialog } from "../documents/openDocument";
 import { saveOpenDocument } from "../documents/saveDocument";
@@ -353,11 +355,36 @@ export function ShellCommandHost() {
           case "document.export":
             useExportDialog.getState().setOpen(true);
             return;
+          case "document.inferSchema": {
+            const { session } = useDocumentSession.getState();
+            if (session.phase === "open") void useSchemaStore.getState().infer(session.document);
+            return;
+          }
+          case "document.validateSchema": {
+            const { session } = useDocumentSession.getState();
+            if (session.phase === "open") {
+              void useSchemaStore.getState().prepareValidationFromShape(session.document);
+            }
+            return;
+          }
+          case "document.generateTypes": {
+            const { session } = useDocumentSession.getState();
+            if (session.phase === "open") {
+              void useSchemaStore.getState().openCodegen(session.document);
+            }
+            return;
+          }
           case "view.map":
             useDocumentView.getState().setView("map");
             return;
           case "view.tree":
             useDocumentView.getState().setView("tree");
+            return;
+          case "view.table":
+            useDocumentView.getState().setView("table");
+            return;
+          case "view.compare":
+            useDocumentView.getState().setView("compare");
             return;
           case "view.source":
             useDocumentView.getState().setView("source");
@@ -371,12 +398,36 @@ export function ShellCommandHost() {
           case "search.jq":
             useSearchStore.getState().open("jq");
             return;
+          case "search.traceValue": {
+            const { session } = useDocumentSession.getState();
+            if (session.phase === "open") void traceSelectedScalar(session.document);
+            return;
+          }
           case "search.next":
             void useSearchStore.getState().step(1);
             return;
           case "search.previous":
             void useSearchStore.getState().step(-1);
             return;
+          case "map.exportPng":
+          case "map.exportSvg": {
+            const map = getActiveMapController();
+            if (map !== null) {
+              void map
+                .exportImage(command === "map.exportPng" ? "png" : "svg", "whole")
+                .catch((error: unknown) => {
+                  toastManager.add(
+                    stackedToast({
+                      type: "error",
+                      title: "Map export failed",
+                      description:
+                        error instanceof Error ? error.message : "Could not export map image.",
+                    }),
+                  );
+                });
+            }
+            return;
+          }
           case "decode.toggle": {
             const { session } = useDocumentSession.getState();
             const tree = session.phase === "open" ? session.document.tree : null;

@@ -6,8 +6,14 @@ import { useDocumentSession } from "./documents/documentSession";
 import { resolveStorage } from "./lib/storage";
 
 const STORAGE_KEY = "quipu:document-view";
-export const AVAILABLE_DOCUMENT_VIEWS: ReadonlyArray<DocumentView> = ["map", "tree", "source"];
-const StoredView = Schema.Literals(["map", "tree", "source"]);
+export const AVAILABLE_DOCUMENT_VIEWS: ReadonlyArray<DocumentView> = [
+  "map",
+  "tree",
+  "table",
+  "compare",
+  "source",
+];
+const StoredView = Schema.Literals(["map", "tree", "table", "compare", "source"]);
 const decodeStored = Schema.decodeUnknownExit(StoredView);
 
 const storage = () => resolveStorage(typeof window === "undefined" ? null : window.localStorage);

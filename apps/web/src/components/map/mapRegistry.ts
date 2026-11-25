@@ -20,6 +20,8 @@ export interface MapController {
   readonly collapseUnder: () => void;
   /** The document nodes the current node stands for: what "in selection" commands act on. */
   readonly selectionScope: () => ReadonlyArray<string>;
+  /** Exports the current map view or whole layout as PNG or SVG. */
+  readonly exportImage: (format: "png" | "svg", scope: "visible" | "whole") => Promise<void>;
 }
 
 let active: MapController | null = null;

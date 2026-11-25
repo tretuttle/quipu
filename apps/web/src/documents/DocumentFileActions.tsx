@@ -24,14 +24,14 @@ export function DocumentFileActions({ document }: { readonly document: OpenDocum
   const readOnly = document.structure !== "none" && !document.editable;
   const invalid = document.problem !== null;
   const formatBadge = (
-    <Badge variant={invalid ? "error" : "outline"} size="default" data-document-format-badge="">
+    <Badge variant={invalid ? "error" : "outline"} size="header" data-document-format-badge="">
       {label}
       {invalid ? " · Not valid" : readOnly ? " · Read-only" : ""}
     </Badge>
   );
   const why = document.problem?.message ?? document.note;
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div className="flex shrink-0 items-center gap-1 @max-[48rem]/workspace-header:gap-0.5">
       {why === null ? (
         formatBadge
       ) : (
@@ -46,7 +46,7 @@ export function DocumentFileActions({ document }: { readonly document: OpenDocum
             <Button
               aria-label="Save"
               onClick={() => runShellCommand("document.save")}
-              size="sm"
+              size="header-sm"
               variant="ghost"
             />
           }
@@ -65,7 +65,7 @@ export function DocumentFileActions({ document }: { readonly document: OpenDocum
             <Button
               aria-label="Export"
               onClick={() => runShellCommand("document.export")}
-              size="sm"
+              size="header-sm"
               variant="ghost"
             />
           }

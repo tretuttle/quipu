@@ -1,5 +1,13 @@
 import type { DesktopOpenedDocument } from "@quipu/contracts";
 import type {
+  DeepSearchAnnotationsResult,
+  DeepSearchQuery,
+  DeepSearchSummary,
+  TraceResult,
+  TraceValueRequest,
+} from "@quipu/contracts/deepSearch";
+import type { JqElementResult, JqSuggestedPath } from "@quipu/contracts/elementMap";
+import type {
   ConvertFormat,
   ConvertSettings,
   DocumentFormat,
@@ -22,6 +30,13 @@ import type {
   TextValue,
   Transform,
 } from "@quipu/contracts/engine";
+import type {
+  CodegenOptions,
+  CodegenResult,
+  HarValidationFilter,
+  InferOptions,
+  Shape,
+} from "@quipu/contracts/schema";
 import { create } from "zustand";
 
 import { toastManager } from "../components/ui/toast";
@@ -36,6 +51,8 @@ import type { InspectSource } from "./inspection.ts";
 import { preloadSourceView } from "./LazySourceView.tsx";
 import { useSelectionStore } from "./selectionStore.ts";
 import type { SourceClient } from "./sourceWindow.ts";
+import type { CompareClient } from "./compareModel.ts";
+import type { TableSource } from "./tableModel.ts";
 import { TreeModel, type TreeSource } from "./treeModel.ts";
 
 /** What search, the path bar and the jq bar ask of the engine; the app passes the typed client, tests a fake. */
@@ -56,6 +73,20 @@ export interface QueryClient {
   readonly closeSearch: (searchId: number) => Promise<null>;
   readonly path: (path: string, limit: number) => Promise<PathQueryResult>;
   readonly jq: (ref: NodeRef, program: string, timeoutMs: number) => Promise<JqResult>;
+  readonly deepSearch?: (query: DeepSearchQuery) => Promise<DeepSearchSummary>;
+  readonly deepSearchAnnotations?: (
+    searchId: number,
+    from: number,
+    to: number,
+  ) => Promise<DeepSearchAnnotationsResult>;
+  readonly traceValue?: (request: TraceValueRequest) => Promise<TraceResult>;
+  readonly jqSuggestPath?: (ref: NodeRef) => Promise<JqSuggestedPath | null>;
+  readonly jqElement?: (
+    ref: NodeRef,
+    path: string | undefined,
+    program: string,
+    timeoutMs: number,
+  ) => Promise<JqElementResult>;
 }
 
 /** What changes a document's bytes; every call answers with the node it re-indexed. */
@@ -267,6 +298,18 @@ const queryClientFor = (transport: EngineTransport, documentId: number): QueryCl
   closeSearch: (searchId) => transport.request("searchClose", { documentId, searchId }),
   path: (path, limit) => transport.request("pathQuery", { documentId, path, limit }),
   jq: (ref, program, timeoutMs) => transport.request("jq", { ref, program, timeoutMs }),
+  deepSearch: (query) => transport.request("deepSearch", { documentId, query }),
+  deepSearchAnnotations: (searchId, from, to) =>
+    transport.request("deepSearchAnnotations", { documentId, searchId, from, to }),
+  traceValue: (request) => transport.request("traceValue", { documentId, request }),
+  jqSuggestPath: (ref) => transport.request("jqSuggestPath", { ref }),
+  jqElement: (ref, path, program, timeoutMs) =>
+    transport.request("jqElement", {
+      ref,
+      ...(path === undefined ? {} : { path }),
+      program,
+      timeoutMs,
+    }),
 });
 
 export const getDocumentFileClient = (documentId: number): DocumentFileClient => {
@@ -295,6 +338,94 @@ export const getDocumentFileClient = (documentId: number): DocumentFileClient =>
 
 /** What the Inspector reads through: the same engine as the tree. */
 export const getInspectSource = (): InspectSource => sourceFor(getEngine());
+
+export const readNodeSummary = (ref: NodeRef) => getEngine().request("node", { ref });
+
+export const readNodeChildren = (ref: NodeRef, from: number, count: number) =>
+  getEngine().request("children", { ref, from, count });
+
+/** Virtualized table queries over arrays and HAR captures via worker-side TableIndexHost. */
+export const getTableSource = (): TableSource => {
+  const transport = getEngine();
+  return {
+    targets: (documentId) => transport.request("tableTargets", { documentId }),
+    query: (spec) =>
+      transport.request("tableQuery", {
+        documentId: spec.documentId,
+        targetPath: spec.targetPath,
+        ...(spec.revision === undefined ? {} : { revision: spec.revision }),
+        sort: spec.sort,
+        filters: [...spec.filters],
+        timeWindow: spec.timeWindow,
+        filteredRowIndices: spec.filteredRowIndices === null ? null : [...spec.filteredRowIndices],
+      }),
+    rows: (documentId, queryId, from, count) =>
+      transport.request("tableRows", { documentId, queryId, from, count }),
+    closeQuery: (documentId, queryId) =>
+      transport.request("tableQueryClose", { documentId, queryId }),
+  };
+};
+
+/** Structural JSON and HAR capture diff client backed by the engine worker. */
+export const createCompareClient = (): CompareClient => {
+  const transport = getEngine();
+  return {
+    openTarget: async (source, name) => {
+      const info = await transport.request("open", { source, name });
+      return {
+        documentId: info.documentId,
+        name: info.name,
+        size: info.size,
+        format: info.format,
+      };
+    },
+    closeTarget: async (documentId) => {
+      await transport.request("close", { documentId });
+    },
+    compareStructural: (aDocumentId, bDocumentId) =>
+      transport.request("compareStructural", { aDocumentId, bDocumentId }),
+    compareHar: (aDocumentId, bDocumentId, reference) =>
+      transport.request("compareHar", { aDocumentId, bDocumentId, reference }),
+    compareHarEntryBody: (aDocumentId, aEntryIndex, bDocumentId, bEntryIndex) =>
+      transport.request("compareHarEntryBody", {
+        aDocumentId,
+        aEntryIndex,
+        bDocumentId,
+        bEntryIndex,
+      }),
+  };
+};
+
+export const traceValue = (documentId: number, request: TraceValueRequest) =>
+  getEngine().request("traceValue", { documentId, request });
+
+export const inferSchema = (ref: NodeRef, options?: InferOptions) =>
+  getEngine().request("inferSchema", {
+    ref,
+    ...(options === undefined ? {} : { options }),
+  });
+
+export const validateSchema = (
+  documentId: number,
+  schemaText: string,
+  filter?: HarValidationFilter | null,
+) =>
+  getEngine().request("validateSchema", {
+    documentId,
+    schemaText,
+    ...(filter === undefined ? {} : { filter }),
+  });
+
+export const codegen = (
+  ref: NodeRef,
+  options: CodegenOptions,
+  shape?: Shape,
+): Promise<CodegenResult> =>
+  getEngine().request("codegen", {
+    ref,
+    options,
+    ...(shape === undefined ? {} : { shape }),
+  });
 
 /** Documents whose index finished before the view existed to hear about it. */
 const finished = new Set<number>();

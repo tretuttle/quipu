@@ -123,6 +123,16 @@ export function TreeView({
   // A node chosen in the source or by search: open the way to it and move the cursor there.
   useEffect(() => {
     if (
+      selection !== null &&
+      selection.documentId === model.documentId &&
+      selection.origin !== "tree" &&
+      selection.origin !== "map" &&
+      selection.origin !== "edit"
+    ) {
+      // Clear any unconsumed focus request from a prior tree/edit action before revealing a search/source pick.
+      moveFocus.current = false;
+    }
+    if (
       selection === null ||
       selection.origin === "tree" ||
       selection.documentId !== model.documentId ||
@@ -164,7 +174,7 @@ export function TreeView({
       (active === null || active === document.body || containerRef.current?.contains(active));
     if (selection?.origin === "map" || editedHere) moveFocus.current = true;
     revealRow(index, focusedId);
-  }, [followsSelection, focusedId, rows, selection?.origin]);
+  }, [followsSelection, focusedId, rows, selection?.origin, selection?.revision]);
 
   // The Inspector shows the row that has the focus.
   useEffect(() => {
@@ -173,6 +183,16 @@ export function TreeView({
 
   useEffect(() => {
     if (!moveFocus.current) return;
+    // Wait until the pending external selection catches up rather than focusing the previous row.
+    if (
+      selection !== null &&
+      selection.documentId === model.documentId &&
+      selection.origin !== "tree" &&
+      selection.revision > local.revision &&
+      !followsSelection
+    ) {
+      return;
+    }
     const target = containerRef.current?.querySelector<HTMLElement>(
       `[data-row-id="${CSS.escape(cursorId)}"]`,
     );
@@ -180,7 +200,7 @@ export function TreeView({
       moveFocus.current = false;
       target.focus({ preventScroll: true });
     }
-  }, [cursorId, rows]);
+  }, [cursorId, rows, selection, model.documentId, local.revision, followsSelection]);
 
   /**
    * A row far from the one that had the focus (End, Home, a search hit) is

@@ -45,10 +45,10 @@ describe("workspace header", () => {
     expect(container.textContent).toContain("Documents");
   });
 
-  it("shows the five views, with the open document's view selected, once one is open", async () => {
+  it("shows the six views, with the open document's view selected, once one is open", async () => {
     await render(<WorkspaceHeader document={{ name: "trace.har", view: "source" }} />);
 
-    expect(viewLabels()).toEqual(["Map", "Tree", "Table", "Source", "ER"]);
+    expect(viewLabels()).toEqual(["Map", "Tree", "Table", "Compare", "Source", "ER"]);
     const pressed = [...(viewToggle()?.querySelectorAll("button") ?? [])]
       .filter((button) => button.getAttribute("aria-pressed") === "true")
       .map((button) => (button.textContent ?? "").trim());

@@ -42,6 +42,18 @@ export const decodeUtf8 = (bytes: Uint8Array, limit = MAX_SLICE_BYTES): string =
 export const parseJsonSlice = (bytes: Uint8Array, limit = MAX_SLICE_BYTES): unknown =>
   JSON.parse(decodeUtf8(bytes, limit));
 
+/** `JSON.parse` of a JSON string token `[quote..quote]` of at most `limit` bytes of UTF-8. */
+export const parseJsonStringSlice = (bytes: Uint8Array, limit = MAX_SLICE_BYTES): string => {
+  const parsed: unknown = JSON.parse(decodeUtf8(bytes, limit));
+  return typeof parsed === "string" ? parsed : String(parsed);
+};
+
+/** `JSON.parse` of an already-decoded string bounded to `limit` UTF-16 code units (`<= MAX_SLICE_BYTES`). */
+export const parseJsonTextSlice = (text: string, limit = MAX_SLICE_BYTES): unknown => {
+  assertWithinLimit(text.length, limit);
+  return JSON.parse(text);
+};
+
 /** The bytes `[start, end)` of a Blob, at most `limit` of them. */
 export const readBlobSlice = async (
   blob: Blob,

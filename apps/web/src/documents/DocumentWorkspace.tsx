@@ -1,5 +1,6 @@
+import { type ByteRange, CHILDREN_PAGE_LIMIT } from "@quipu/contracts/engine";
 import { FileIcon, FileUpIcon, TriangleAlertIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
 import { Spinner } from "~/components/ui/spinner";
@@ -9,15 +10,27 @@ import { MapStatus } from "~/components/map/mapStatus";
 import { useDocumentView } from "~/documentViewStore";
 import { DecodeMenu } from "./DecodeMenu.tsx";
 import { useDecodePreferences } from "./decodePreferences.ts";
-import { type OpenDocument, useDocumentSession } from "./documentSession.ts";
+import { CodegenDialog } from "./CodegenDialog.tsx";
+import { CompareView } from "./CompareView.tsx";
+import {
+  codegen,
+  createCompareClient,
+  getTableSource,
+  type OpenDocument,
+  readNodeChildren,
+  useDocumentSession,
+} from "./documentSession.ts";
 import { structuredFormatNames } from "./formatNames.ts";
+import { filterRowIndicesByHits, useMatchFilterStore } from "./hitFilter.ts";
 import { focusViewWhenReady } from "./viewFocus.ts";
 import { ExportDialog } from "./ExportDialog.tsx";
 import { forgetRecent, openWithDialog, REMOVE_RECENT } from "./openDocument.ts";
 import { useProblemFocus } from "./problemFocus.ts";
 import { SourceView } from "./LazySourceView.tsx";
 import { QueryBar } from "./QueryBar.tsx";
+import { useSchemaStore } from "./schemaStore.ts";
 import { selectedNodeId, useSelectionStore } from "./selectionStore.ts";
+import { TableView } from "./TableView.tsx";
 import { TreeView } from "./TreeView.tsx";
 
 /** What fills the page under the header: the empty state, a progress line, an error, or the view. */
@@ -84,6 +97,20 @@ export function DocumentWorkspace() {
   }
 }
 
+const TABLE_RANGE_SCAN_LIMIT = 50_000;
+
+const defaultRootTypeName = (name: string): string => {
+  const words = name
+    .replace(/\.[^.]+$/, "")
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 0);
+  if (words.length === 0) return "Root";
+  const joined = words.map((word) => `${word[0]!.toUpperCase()}${word.slice(1)}`).join("");
+  return /^[A-Za-z_]/.test(joined) ? joined : `Doc${joined}`;
+};
+
 function OpenDocumentView({ document }: { readonly document: OpenDocument }) {
   const view = useDocumentView((state) => state.view);
   const tree = document.tree;
@@ -101,6 +128,94 @@ function OpenDocumentView({ document }: { readonly document: OpenDocument }) {
   useEffect(() => {
     tree?.setAutoDecode(autoDecode);
   }, [tree, autoDecode]);
+
+  const matchFilterEnabled = useMatchFilterStore((state) => state.enabled);
+  const matchedIds = useMatchFilterStore((state) => state.matchedIds);
+  const hitRanges = useMatchFilterStore((state) => state.hitRanges);
+  useEffect(() => {
+    tree?.setMatchFilter(matchFilterEnabled ? matchedIds : null);
+  }, [tree, matchFilterEnabled, matchedIds]);
+
+  const filterKey =
+    matchFilterEnabled && view === "table" && tree !== null && hitRanges.length > 0
+      ? `${document.documentId}:${document.revision}:${hitRanges.length}:${hitRanges[0]!.start}`
+      : null;
+  const [tableRowsState, setTableRowsState] = useState<{
+    readonly key: string;
+    readonly rows: ReadonlyArray<number>;
+  } | null>(null);
+  const tableFilteredRows: ReadonlyArray<number> | null =
+    !matchFilterEnabled || view !== "table" || tree === null
+      ? null
+      : hitRanges.length === 0
+        ? []
+        : tableRowsState?.key === filterKey
+          ? tableRowsState.rows
+          : null;
+  useEffect(() => {
+    if (filterKey === null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const discovered = await getTableSource().targets(document.documentId);
+        if (cancelled) return;
+        const target =
+          discovered.targets.find((t) => t.path === discovered.recommendedPath) ??
+          discovered.targets[0] ??
+          null;
+        if (target === null || target.rowCount === 0) {
+          setTableRowsState({ key: filterKey, rows: [] });
+          return;
+        }
+        if (target.rowCount <= TABLE_RANGE_SCAN_LIMIT) {
+          const rowRanges: Array<ByteRange | null> = [];
+          for (let from = 0; from < target.rowCount; from += CHILDREN_PAGE_LIMIT) {
+            const page = await readNodeChildren(
+              target.ref,
+              from,
+              Math.min(CHILDREN_PAGE_LIMIT, target.rowCount - from),
+            );
+            if (cancelled) return;
+            for (const child of page.nodes) rowRanges.push(child.span);
+          }
+          setTableRowsState({
+            key: filterKey,
+            rows: filterRowIndicesByHits(rowRanges, hitRanges),
+          });
+          return;
+        }
+        const rowIndices = new Set<number>();
+        for (const hit of hitRanges) {
+          const found = await document.source.nodeAt(hit.start).catch(() => null);
+          if (cancelled) return;
+          if (found === null) continue;
+          const targetIdx = found.path.findIndex(
+            (step) =>
+              step.node.ref.tapeId === target.ref.tapeId &&
+              step.node.ref.token === target.ref.token,
+          );
+          const elementStep = targetIdx >= 0 ? found.path[targetIdx + 1] : undefined;
+          if (elementStep?.index !== null && elementStep?.index !== undefined) {
+            const single = filterRowIndicesByHits([elementStep.node.span], hitRanges);
+            if (single.length > 0) rowIndices.add(elementStep.index);
+          }
+        }
+        setTableRowsState({
+          key: filterKey,
+          rows: [...rowIndices].sort((a, b) => a - b),
+        });
+      } catch {
+        // Leave unfiltered rows on transient cancellation/reload error.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [document, filterKey, hitRanges]);
+
+  const codegenOpen = useSchemaStore((state) => state.codegenOpen);
+  const schemaShape = useSchemaStore((state) => state.shape);
+
   return (
     <div
       className="flex min-h-0 flex-1 flex-col"
@@ -121,6 +236,24 @@ function OpenDocumentView({ document }: { readonly document: OpenDocument }) {
         <SourceView key={document.documentId} document={document} />
       ) : view === "map" ? (
         <MapView key={document.documentId} document={{ ...document, tree }} />
+      ) : view === "table" ? (
+        <TableView
+          key={document.documentId}
+          document={document}
+          source={getTableSource()}
+          filteredRowIndices={tableFilteredRows}
+        />
+      ) : view === "compare" ? (
+        <CompareView
+          key={document.documentId}
+          primary={{
+            documentId: document.documentId,
+            name: document.name,
+            size: document.size,
+            format: document.format,
+          }}
+          client={createCompareClient()}
+        />
       ) : (
         <TreeView key={document.documentId} model={tree} queries={document.queries} />
       )}
@@ -155,6 +288,22 @@ function OpenDocumentView({ document }: { readonly document: OpenDocument }) {
         ) : null}
       </div>
       <ExportDialog document={document} />
+      {tree !== null ? (
+        <CodegenDialog
+          open={codegenOpen}
+          onOpenChange={(open) => useSchemaStore.getState().setCodegenOpen(open)}
+          defaultRootName={defaultRootTypeName(document.name)}
+          generate={async (options) => {
+            const shape =
+              schemaShape ?? (await useSchemaStore.getState().infer(document, undefined, false));
+            return codegen(
+              { documentId: document.documentId, tapeId: 0, token: 0 },
+              options,
+              shape ?? undefined,
+            );
+          }}
+        />
+      ) : null}
     </div>
   );
 }

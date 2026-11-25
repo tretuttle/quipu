@@ -1,6 +1,10 @@
 /** Messages between the engine coordinator and its scan workers. */
 import type { FormatState } from "./format.ts";
 import type { BoundarySummary, EntryState, StructureReport } from "./scan.ts";
+import type { InferOptions, Shape } from "@quipu/contracts/schema";
+import type { DeepChunkResult, ParityResult } from "./deepSearch.ts";
+import type { HarEntryPrint } from "./diff/har.ts";
+import type { HarTableRawRow } from "./tableIndex.ts";
 import type { ChunkOptions, ChunkResult, SearchSpec } from "./search.ts";
 import type { SourceSpec } from "./source.ts";
 import type { TapeBuffers } from "./tape.ts";
@@ -64,6 +68,26 @@ export type Job =
       readonly resumeAt: number | null;
     }
   | {
+      readonly type: "quoteParity";
+      readonly sourceId: number;
+      readonly start: number;
+      readonly end: number;
+      readonly size: number;
+      readonly decode: boolean;
+    }
+  | {
+      readonly type: "deepSearch";
+      readonly sourceId: number;
+      readonly start: number;
+      readonly end: number;
+      readonly size: number;
+      readonly decode: boolean;
+      readonly spec: SearchSpec;
+      readonly options: ChunkOptions;
+      readonly resumeAt: number | null;
+      readonly entryInString: boolean;
+    }
+  | {
       readonly type: "unescape";
       readonly sourceId: number;
       readonly contentStart: number;
@@ -103,6 +127,54 @@ export type Job =
       readonly sourceId: number;
       readonly start: number;
       readonly end: number;
+    }
+  | {
+      readonly type: "harTableWindow";
+      readonly sourceId: number;
+      readonly start: number;
+      readonly end: number;
+      readonly baseIndex: number;
+      readonly expectedCount: number;
+      readonly stepBytes: number;
+    }
+  | {
+      readonly type: "harTableSlices";
+      readonly sourceId: number;
+      readonly items: ReadonlyArray<{
+        readonly index: number;
+        readonly start: number;
+        readonly end: number;
+      }>;
+    }
+  | {
+      readonly type: "harPrintWindow";
+      readonly sourceId: number;
+      readonly start: number;
+      readonly end: number;
+      readonly baseIndex: number;
+      readonly stepBytes: number;
+    }
+  | {
+      readonly type: "harPrintSlices";
+      readonly sourceId: number;
+      readonly items: ReadonlyArray<{
+        readonly index: number;
+        readonly start: number;
+        readonly end: number;
+      }>;
+    }
+  | {
+      readonly type: "hashSourceRange";
+      readonly sourceId: number;
+      readonly start: number;
+      readonly end: number;
+      readonly stepBytes: number;
+    }
+  | {
+      readonly type: "inferBatch";
+      readonly buffer: ArrayBuffer;
+      readonly items: ReadonlyArray<{ readonly start: number; readonly end: number }>;
+      readonly options?: Partial<InferOptions>;
     };
 
 export interface SummarizeResult {
@@ -136,6 +208,35 @@ export interface FormatResult {
   readonly state: FormatState;
 }
 
+export interface HarTableWindowResult {
+  readonly baseIndex: number;
+  readonly rows: ReadonlyArray<HarTableRawRow | null>;
+}
+
+export interface HarTableColumnarWindowResult {
+  readonly baseIndex: number;
+  readonly count: number;
+  readonly nums: Float64Array;
+  readonly methods: ReadonlyArray<string | null>;
+  readonly urls: ReadonlyArray<string | null>;
+  readonly mimeTypes: ReadonlyArray<string | null>;
+  readonly startedDateTimes: ReadonlyArray<string | null>;
+}
+
+export interface HarPrintWindowResult {
+  readonly baseIndex: number;
+  readonly prints: ReadonlyArray<HarEntryPrint | null>;
+  readonly oversized: ReadonlyArray<{
+    readonly entryIndex: number;
+    readonly start: number;
+    readonly end: number;
+  }>;
+}
+
+export interface HashSourceRangeResult {
+  readonly hash: bigint;
+}
+
 export type JobResult =
   | SummarizeResult
   | Unescaped
@@ -144,7 +245,14 @@ export type JobResult =
   | StructureResult
   | IndexRangeResult
   | ChunkResult
+  | DeepChunkResult
+  | ParityResult
   | FormatResult
+  | HarTableWindowResult
+  | HarTableColumnarWindowResult
+  | HarPrintWindowResult
+  | HashSourceRangeResult
+  | Shape
   | Uint8Array
   | null;
 

@@ -45,9 +45,14 @@ export const COMMANDS: Readonly<Record<KeybindingCommand, CommandInfo>> = {
   "document.export": { title: "Export…", group: "document" },
   "document.undo": { title: "Undo edit", group: "document" },
   "document.redo": { title: "Redo edit", group: "document" },
+  "document.inferSchema": { title: "Infer schema", group: "document" },
+  "document.validateSchema": { title: "Validate with schema", group: "document" },
+  "document.generateTypes": { title: "Generate types", group: "document" },
 
   "view.map": { title: "Show map view", group: "view" },
   "view.tree": { title: "Show tree view", group: "view" },
+  "view.table": { title: "Show table view", group: "view" },
+  "view.compare": { title: "Compare documents", group: "view" },
   "view.source": { title: "Show source view", group: "view" },
   "tree.expandAll": { title: "Expand all in tree", group: "view" },
   "tree.collapseAll": { title: "Collapse all in tree", group: "view" },
@@ -57,6 +62,7 @@ export const COMMANDS: Readonly<Record<KeybindingCommand, CommandInfo>> = {
   "search.previous": { title: "Previous match", group: "search" },
   "search.path": { title: "Path query", group: "search" },
   "search.jq": { title: "jq filter", group: "search" },
+  "search.traceValue": { title: "Trace value", group: "search" },
 
   "node.editValue": { title: "Edit value", group: "edit" },
   "node.renameKey": { title: "Rename key", group: "edit" },
@@ -86,6 +92,8 @@ export const COMMANDS: Readonly<Record<KeybindingCommand, CommandInfo>> = {
   "map.collapseAll": { title: "Collapse all on map", group: "map" },
   "map.expandUnder": { title: "Expand all under selection", group: "map" },
   "map.collapseUnder": { title: "Collapse all under selection", group: "map" },
+  "map.exportPng": { title: "Export map PNG", group: "map" },
+  "map.exportSvg": { title: "Export map SVG", group: "map" },
 
   "map.fit": { title: "Zoom to fit", group: "canvas" },
   "map.zoomIn": { title: "Zoom in", group: "canvas" },

@@ -929,4 +929,43 @@ describe("MapModel", () => {
     expect(rowsOf(page.id)[2]).toBe("[2000…2499]: 500 requests");
     model.stop();
   });
+
+  it("filters map nodes and rows to exact hits plus ancestors and restores full map on toggle off", async () => {
+    const { source, root } = fakeEngine({
+      alpha: { target: "hit", skip: "no" },
+      beta: { other: "no" },
+    });
+    const tree = new TreeModel(source, root);
+    const model = new MapModel(tree, {
+      documentId: 1,
+      format: "json",
+      layout: syncLayout,
+      rebuildDelayMs: 0,
+    });
+    model.start();
+    await tree.setExpanded(tree.rootId, true);
+    await tree.idle();
+    const alpha = tree.view().find((row) => row.name === "alpha")!;
+    const beta = tree.view().find((row) => row.name === "beta")!;
+    await tree.setExpanded(alpha.id, true);
+    await tree.setExpanded(beta.id, true);
+    await tree.idle();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const full = model.getSnapshot();
+    expect(full.nodes).toHaveLength(3); // root, alpha, beta
+    const targetRow = tree.view().find((row) => row.name === "target")!;
+
+    model.setMatchFilter(new Set([targetRow.id]));
+    const filtered = model.getSnapshot();
+    expect(filtered.nodes).toHaveLength(2); // root + alpha
+    expect(filtered.nodes[0]?.rows.map((r) => r.key)).toEqual(["alpha"]);
+    expect(filtered.nodes[1]?.rows.map((r) => r.key)).toEqual(["target"]);
+
+    model.setMatchFilter(null);
+    const restored = model.getSnapshot();
+    expect(restored.nodes).toHaveLength(3);
+    expect(restored.nodes[0]?.rows.map((r) => r.key)).toEqual(["alpha", "beta"]);
+    model.stop();
+  });
 });

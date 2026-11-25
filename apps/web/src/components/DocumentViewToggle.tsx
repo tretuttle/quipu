@@ -3,17 +3,17 @@ import { commandTitle } from "@quipu/shared/commands";
 
 import { shortcutLabelForCommand } from "../keybindings";
 import { useResolvedKeybindings } from "../keybindingsStore";
-import { Toggle } from "./ui/toggle";
-import { ToggleGroup } from "./ui/toggle-group";
+import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
-const DOCUMENT_VIEWS = ["map", "tree", "table", "source", "er"] as const;
+const DOCUMENT_VIEWS = ["map", "tree", "table", "compare", "source", "er"] as const;
 export type DocumentView = (typeof DOCUMENT_VIEWS)[number];
 
 const DOCUMENT_VIEW_LABELS: Readonly<Record<DocumentView, { label: string; hint: string }>> = {
   map: { label: "Map", hint: "Show the document as a map" },
   tree: { label: "Tree", hint: "Show the document as a tree" },
   table: { label: "Table", hint: "Show the document as a table" },
+  compare: { label: "Compare", hint: "Compare against another document" },
   source: { label: "Source", hint: "Show the document's text" },
   er: { label: "ER", hint: "Show the document as an entity-relationship diagram" },
 };
@@ -22,6 +22,8 @@ const DOCUMENT_VIEW_LABELS: Readonly<Record<DocumentView, { label: string; hint:
 const VIEW_COMMANDS: Partial<Record<DocumentView, KeybindingCommand>> = {
   map: "view.map",
   tree: "view.tree",
+  table: "view.table",
+  compare: "view.compare",
   source: "view.source",
 };
 
@@ -54,6 +56,7 @@ export function DocumentViewToggle({
     <ToggleGroup
       aria-label="Document view"
       variant="segmented"
+      size="header-segmented"
       value={[value]}
       onValueChange={(next) => {
         const view = next[0];

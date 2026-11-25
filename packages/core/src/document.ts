@@ -72,7 +72,7 @@ import {
 import * as Schema from "effect/Schema";
 
 import { AppendBuffer } from "./appendBuffer.ts";
-import { checkedLimit, decodeUtf8 } from "./boundedSlice.ts";
+import { checkedLimit, decodeUtf8, parseJsonSlice } from "./boundedSlice.ts";
 import { BYTE_CLASS, CLASS_WS, COMMA } from "./bytes.ts";
 import { DETECT_HEAD_BYTES, detectFormat } from "./detect.ts";
 import {
@@ -102,7 +102,34 @@ import { DEFAULT_REGION_BYTES, DEFAULT_TOKEN_BUDGET, indexDocument } from "./ind
 import { Journal, type JournalRecord } from "./journal.ts";
 import type { JournalStore } from "./journalStore.ts";
 import type { BucketAnchors } from "./merge.ts";
-import { parsePath, PathSyntaxError, type Segment, type Selector } from "./pathParse.ts";
+import type {
+  JqElementRequest,
+  JqElementResult,
+  JqSuggestedPath,
+} from "@quipu/contracts/elementMap";
+import {
+  elementBatchMap,
+  elementMap,
+  type ElementBatch,
+  type ElementDescriptor,
+  type ElementMapOptions,
+  type ElementMapResult,
+  type ElementSlice,
+  type ElementSource,
+} from "./elementMap.ts";
+import {
+  evalFilterSelector,
+  evalPathExpression,
+  type PathFilterHost,
+  type PathNodeInfo,
+} from "./pathFilter.ts";
+import {
+  parsePath,
+  PathSyntaxError,
+  type FilterLiteral,
+  type Segment,
+  type Selector,
+} from "./pathParse.ts";
 import { packPieces, pieceSource } from "./pieceSource.ts";
 import {
   ORIGINAL_BUFFER,
@@ -115,6 +142,7 @@ import { BudgetExceededError, type Pool } from "./pool.ts";
 import type { Base64PieceResult, IndexRangeResult, Unescaped } from "./protocol.ts";
 import { INITIAL_ENTRY } from "./resolve.ts";
 import { copyRange, formatThroughPool, openSink, type Sink } from "./save.ts";
+import { mirrorSourceToSpillBlob, openSpillScratch, teeSink } from "./spillReadable.ts";
 import { FULL_DEPTH, type EntryState, type SyntaxCode, type SyntaxProblem } from "./scan.ts";
 import { SegmentedTape } from "./segmentedTape.ts";
 import {
@@ -124,7 +152,71 @@ import {
   DEFAULT_CHUNK_OPTIONS,
   type SearchSpec,
 } from "./search.ts";
+import type {
+  DeepHitAnnotation,
+  DeepSearchQuery,
+  DeepSearchSummary,
+  TraceResult,
+  TraceValueRequest,
+} from "@quipu/contracts/deepSearch";
+import { runDeepSearch } from "./deepSearch.ts";
 import { runSearch, type SearchOutcome } from "./searchRun.ts";
+import { traceExactValue } from "./trace.ts";
+import {
+  DiffTooLargeError,
+  MAX_STRUCTURAL_DIFF_BYTES,
+  type HarDiffSummary,
+  type StructuralDiffResult,
+} from "@quipu/contracts/diff";
+import {
+  DEFAULT_MAX_ENUM,
+  DEFAULT_MAX_INFER_DEPTH,
+  MAX_SCHEMA_FAILURES,
+  type CodegenOptions,
+  type CodegenResult,
+  type FieldShape,
+  type HarValidationFilter,
+  type InferOptions,
+  type SchemaFailure,
+  type Shape,
+  type ValidationResult,
+} from "@quipu/contracts/schema";
+import { generateFromShape } from "./codegen/index.ts";
+import {
+  diffHarCaptures,
+  diffHarEntryBodies,
+  diffJsonBytes,
+  extractHarEntryPrintFromSlice,
+  extractHarPrintsStreaming,
+  type HarEntryPrint,
+} from "./diff/index.ts";
+import type {
+  HarPrintWindowResult,
+  HarTableColumnarWindowResult,
+  HarTableWindowResult,
+  HashSourceRangeResult,
+} from "./protocol.ts";
+import {
+  emptyShape,
+  inferJsonSlice,
+  mergeShape,
+  parseSchema,
+  SchemaParseError,
+  validateHarEntries,
+  validateJsonSlice,
+  type HarEntryInput,
+  type LocalSchema,
+} from "./schema/index.ts";
+import {
+  createTableDocAccessFromHandle,
+  HAR_COL_STRIDE,
+  type HarEntryCellRefs,
+  type HarTableColumnarData,
+  type HarTableRawRow,
+  type ResolvedHarRowBatchItem,
+  TableIndexHost,
+  type TableDocAccess,
+} from "./tableIndex.ts";
 import {
   type ByteSource,
   blobSource,
@@ -173,6 +265,8 @@ export interface HostPlatform {
     timeoutMs: number,
     outputLimit: number,
   ) => Promise<JqOutcome>;
+  /** When true, `jqElement` packs contiguous element batches as JSON arrays to amortize worker/WASM overhead. */
+  readonly runJqBatch?: boolean;
   /** Where edit journals live; without one, edits are not journaled. Set late by the desktop's port. */
   journalStore?: JournalStore | undefined;
   /**
@@ -341,8 +435,8 @@ interface Doc {
 
 interface Spill {
   readonly source: ByteSource;
-  /** The worker-side source id, or -1 when the workers cannot read it (a desktop spill reached over a port). */
   readonly sourceId: number;
+  readonly release?: (() => Promise<void>) | undefined;
 }
 
 /** Collects a transform's output; `finish` turns it into pieces of a new buffer. */
@@ -431,6 +525,8 @@ interface OpenDocument {
   replayPending: boolean;
   /** The recovered journal could not be replayed; the document was rolled back to the file and the journal dropped. */
   restoreFailed: boolean;
+  /** Cached unedited HAR entry comparison prints, invalidated on any edit/replay/close. */
+  harPrintsCache: Promise<ReadonlyArray<HarEntryPrint>> | null;
   /** Edits are serialized; a save waits for the edit in flight and blocks edits. */
   mutex: Promise<unknown>;
   doc: Doc;
@@ -459,6 +555,7 @@ interface SearchRecord {
   readonly decode: boolean;
   readonly outcome: SearchOutcome;
   readonly view: SearchView;
+  readonly annotations?: ReadonlyArray<DeepHitAnnotation>;
 }
 
 /** The bytes a search ran over: the file, or an edited document's composed window. */
@@ -500,6 +597,18 @@ const KIND_NAMES: Record<number, NodeKind> = {
  * node's first rows are what a map shows, so one read answers most nodes.
  */
 const ROWS_WINDOW_BYTES = 16 * 1024;
+const HAR_ENTRY_REF_KEYS = new Set(["request", "response", "time"]);
+const HAR_REQ_REF_KEYS = new Set(["method", "url"]);
+const HAR_RESP_REF_KEYS = new Set(["status", "bodySize", "content"]);
+const HAR_CONTENT_REF_KEYS = new Set(["mimeType", "size"]);
+const EMPTY_HAR_CELL_REFS: HarEntryCellRefs = {
+  methodRef: null,
+  urlRef: null,
+  statusRef: null,
+  mimeTypeRef: null,
+  bodySizeRef: null,
+  timeMsRef: null,
+};
 /** How far into an entry the HAR grouping looks for `pageref` and `request.url` before reading per row. */
 const HAR_ENTRY_WINDOW_BYTES = 8 * 1024;
 const HAR_REQUEST_WINDOW_BYTES = 4 * 1024;
@@ -683,6 +792,16 @@ export class EngineHost {
   private readonly appendChunkBytes: number | undefined;
   private readonly documents = new Map<number, OpenDocument>();
   private nextDocumentId = 1;
+  private readonly tableIndex = new TableIndexHost();
+  private readonly tableAccess: TableDocAccess = {
+    ...createTableDocAccessFromHandle(
+      (req) => this.handle(req as EngineRequest),
+      (id) => this.document(id).format,
+    ),
+    readHarEntriesFast: (documentId, targetRef, totalRows) =>
+      this.readHarEntriesFast(documentId, targetRef, totalRows),
+    resolveHarRowsBatch: (targetRef, rowIndices) => this.resolveHarRowsBatch(targetRef, rowIndices),
+  };
   onEvent: ((event: EngineEvent) => void) | undefined;
 
   constructor(platform: HostPlatform, options: HostOptions = {}) {
@@ -845,6 +964,48 @@ export class EngineHost {
         return this.exportTargets(request.documentId);
       case "convert":
         return this.convert(request.documentId, request.to, request.settings, request.sink);
+      case "jqSuggestPath":
+        return this.suggestJqElementPath(request.ref);
+      case "jqElement":
+        return this.jqElement(request);
+      case "deepSearch":
+        return this.deepSearch(request.documentId, request.query);
+      case "deepSearchAnnotations":
+        return Promise.resolve({
+          annotations: this.deepSearchAnnotations(
+            request.documentId,
+            request.searchId,
+            request.from,
+            request.to,
+          ),
+        });
+      case "traceValue":
+        return this.traceValue(request.documentId, request.request);
+      case "tableTargets":
+        return this.tableIndex.targets(this.tableAccess, request.documentId);
+      case "tableQuery":
+        return this.tableIndex.query(this.tableAccess, request);
+      case "tableRows":
+        return this.tableIndex.rows(this.tableAccess, request.queryId, request.from, request.count);
+      case "tableQueryClose":
+        return Promise.resolve(this.tableIndex.closeQuery(request.queryId));
+      case "compareStructural":
+        return this.compareStructural(request.aDocumentId, request.bDocumentId);
+      case "compareHar":
+        return this.compareHar(request.aDocumentId, request.bDocumentId, request.reference);
+      case "compareHarEntryBody":
+        return this.compareHarEntryBody(
+          request.aDocumentId,
+          request.aEntryIndex,
+          request.bDocumentId,
+          request.bEntryIndex,
+        );
+      case "inferSchema":
+        return this.inferSchema(request.ref, request.options);
+      case "validateSchema":
+        return this.validateSchema(request.documentId, request.schemaText, request.filter);
+      case "codegen":
+        return this.codegen(request.ref, request.options, request.shape);
     }
   }
 
@@ -942,6 +1103,7 @@ export class EngineHost {
       journalFrom: null,
       journalOff: false,
       retiredJournals: [],
+      harPrintsCache: null,
       mutex: Promise.resolve(),
       doc: undefined as unknown as Doc,
       journal: null,
@@ -1177,6 +1339,7 @@ export class EngineHost {
     } finally {
       document.replaying = false;
       document.replayPending = false;
+      document.harPrintsCache = null;
       document.revision++;
       this.emitEditState(document);
     }
@@ -1278,6 +1441,8 @@ export class EngineHost {
 
   private async close(documentId: number): Promise<null> {
     const document = this.document(documentId);
+    document.harPrintsCache = null;
+    this.tableIndex.closeDocument(documentId);
     this.documents.delete(documentId);
     document.currentSearch = -1;
     await document.indexed.catch(() => {});
@@ -1291,9 +1456,15 @@ export class EngineHost {
     document.source.close();
     // A converted document reads the file for its Source view too: that reader holds the file open.
     document.display?.source.close();
+    await this.releaseSpills(document.doc);
     await document.release?.();
     await document.detached?.();
     return null;
+  }
+
+  private async releaseSpills(doc: Doc): Promise<void> {
+    for (const spill of doc.spills) await spill.release?.().catch(() => {});
+    for (const link of doc.children.values()) await this.releaseSpills(link.child);
   }
 
   /** Queries wait for the index and the journal replay; replay itself never calls this. */
@@ -1702,15 +1873,14 @@ export class EngineHost {
   }
 
   /**
-   * Where a transform's output goes: a spill file in the journal directory when
-   * the document has one (readable by the workers as a Blob when the store can
-   * hand one out), otherwise shared memory chunks. Either way the output becomes
-   * one new piece buffer, and the edit that installs it is undoable like any other.
+   * Where a transform's output goes: a journal spill file backed by a worker-readable
+   * Blob (directly from OPFS when the store provides one, or mirrored to an OPFS
+   * scratch file with memory fallback), or an OPFS/memory scratch Blob when unjournaled.
    */
   private async createSpill(doc: Doc): Promise<SpillWriter> {
     const document = doc.owner;
     const journal = document.journal;
-    if (journal) {
+    if (journal && journal.store.blob) {
       const name = journal.newSpill();
       let length = 0;
       return {
@@ -1730,67 +1900,69 @@ export class EngineHost {
         abort: () => journal.store.remove(journal.spillPath(name)),
       };
     }
-    const chunks = new AppendBuffer(this.appendChunkBytes);
+    const scratch = await openSpillScratch();
+    const name = journal ? journal.newSpill() : undefined;
     let length = 0;
+    const journalSink: Sink | null =
+      journal && name !== undefined
+        ? {
+            write: (bytes) => journal.appendSpill(name, bytes),
+            close: () => journal.store.close(journal.spillPath(name)),
+            abort: () => journal.store.remove(journal.spillPath(name)),
+          }
+        : null;
+    const rawSink = journalSink ? teeSink(journalSink, scratch.sink) : scratch.sink;
     return {
       sink: {
-        write: (bytes) => {
-          chunks.append(bytes);
+        write: async (bytes) => {
+          await rawSink.write(bytes);
           length += bytes.byteLength;
-          return Promise.resolve();
         },
-        close: () => Promise.resolve(),
-        abort: () => Promise.resolve(),
+        close: () => rawSink.close(),
+        abort: () => rawSink.abort(),
       },
       finish: async () => {
+        await rawSink.close();
+        const blob = await scratch.finish();
         const sourceId = document.nextSourceId++;
-        await document.pool.broadcast({
-          type: "open",
-          sourceId,
-          spec: {
-            kind: "append",
-            chunks: chunks.chunks.map((chunk) => chunk.buffer),
-            chunkBytes: chunks.chunkBytes,
-            length,
-          },
-        });
+        await document.pool.broadcast({ type: "open", sourceId, spec: { kind: "blob", blob } });
         const index = 2 + doc.spills.length;
-        doc.spills.push({ source: chunks.asSource(), sourceId });
+        doc.spills.push({ source: blobSource(blob), sourceId, release: scratch.release });
         return {
           pieces: length > 0 ? [{ buffer: index, start: 0, length }] : [],
           length,
-          src: undefined,
+          src: name,
         };
       },
-      abort: () => Promise.resolve(),
+      abort: async () => {
+        await rawSink.abort().catch(() => {});
+        await scratch.release().catch(() => {});
+      },
     };
   }
 
-  /** Registers a journal spill file as a buffer of the doc and returns the piece covering it. */
+  /** Registers a journal spill file as a worker-readable buffer of the doc and returns its piece. */
   private async attachSpill(doc: Doc, name: string, length: number): Promise<Piece[]> {
     const document = doc.owner;
     const journal = document.journal as Journal;
     const path = journal.spillPath(name);
     await journal.store.close(path);
-    const blob = journal.store.blob ? await journal.store.blob(path) : null;
-    let sourceId = -1;
-    let source: ByteSource;
-    if (blob) {
-      source = blobSource(blob);
-      sourceId = document.nextSourceId++;
-      await document.pool.broadcast({ type: "open", sourceId, spec: { kind: "blob", blob } });
-    } else {
+    let blob = journal.store.blob ? await journal.store.blob(path) : null;
+    let release: (() => Promise<void>) | undefined;
+    if (!blob) {
       const store = journal.store;
-      const read = (start: number, end: number) => store.read(path, start, end);
-      source = {
-        size: length,
-        read,
-        readInto: async (start, end, buffer) => ({ bytes: await read(start, end), buffer }),
-        close: () => {},
-      };
+      const mirrored = await mirrorSourceToSpillBlob(
+        { read: (start, end) => store.read(path, start, end) },
+        length,
+      );
+      blob = mirrored.blob;
+      release = mirrored.release;
     }
+    const source = blobSource(blob);
+    const sourceId = document.nextSourceId++;
+    await document.pool.broadcast({ type: "open", sourceId, spec: { kind: "blob", blob } });
     const index = 2 + doc.spills.length;
-    doc.spills.push({ source, sourceId });
+    doc.spills.push({ source, sourceId, release });
     return length > 0 ? [{ buffer: index, start: 0, length }] : [];
   }
 
@@ -2255,6 +2427,7 @@ export class EngineHost {
     from: number,
     count: number,
   ): Promise<EngineResult["harEntries"]> {
+    const doc = this.document(documentId);
     const root = await this.root(documentId);
     const empty = { entries: null, from, total: 0, pages: [], items: [] };
     if (root.kind !== "object") return empty;
@@ -2284,8 +2457,66 @@ export class EngineHost {
       return { ...empty, pages };
     }
     const entries = await this.rows(entriesNode.node.ref, from, count, 1);
-    // Entries are independent of each other: keeping a batch of reads in flight
-    // hides the per-slice latency on captures with tens of thousands of entries.
+    // When clean and settled, extract the whole page in worker slices to avoid stalling Table opens.
+    if (entries.rows.length > 0 && !this.isDirty(doc.doc) && doc.display?.sameOffsets !== true) {
+      const slices: Array<{
+        readonly index: number;
+        readonly start: number;
+        readonly end: number;
+      }> = [];
+      for (let i = 0; i < entries.rows.length; i++) {
+        const r = entries.rows[i]!;
+        if (r.node.kind !== "object" || !r.node.settled) continue;
+        const len = r.node.span.end - r.node.span.start;
+        if (len > 0 && len <= MAX_SLICE_BYTES) {
+          slices.push({ index: i, start: r.node.span.start, end: r.node.span.end });
+        }
+      }
+      if (slices.length > 0) {
+        const shardCount = Math.min(Math.max(1, doc.pool.size), 4, slices.length);
+        const perShard = Math.ceil(slices.length / shardCount);
+        const byRowIdx = new Map<number, HarTableRawRow | null>();
+        await Promise.all(
+          Array.from({ length: shardCount }, async (_, workerId) => {
+            const part = slices.slice(workerId * perShard, (workerId + 1) * perShard);
+            if (part.length === 0) return;
+            const res = await doc.pool.call<HarTableWindowResult>(workerId, {
+              type: "harTableSlices",
+              sourceId: DOCUMENT_SOURCE_ID,
+              items: part,
+            });
+            for (let k = 0; k < part.length; k++) {
+              byRowIdx.set(part[k]!.index, res.rows[k] ?? null);
+            }
+          }),
+        );
+        const fastItems: HarEntrySummary[] = [];
+        for (let i = 0; i < entries.rows.length; i++) {
+          const entry = entries.rows[i]!;
+          const raw = byRowIdx.get(i) ?? null;
+          if (raw !== null) {
+            fastItems.push({
+              ref: entry.node.ref,
+              host: hostOf(raw.url),
+              pageref: raw.pageref,
+              method: raw.method,
+              url: raw.url,
+              status: raw.status,
+            });
+          } else {
+            fastItems.push(await this.harEntry(entry));
+          }
+        }
+        return {
+          entries: entriesNode.node.ref,
+          from: entries.from,
+          total: entries.total,
+          pages,
+          items: fastItems,
+        };
+      }
+    }
+    // Fallback for incremental indexing, JSONC, or edited captures.
     const items: HarEntrySummary[] = [];
     for (let at = 0; at < entries.rows.length; at += HAR_ENTRY_CONCURRENCY) {
       const batch = entries.rows.slice(at, at + HAR_ENTRY_CONCURRENCY);
@@ -2615,12 +2846,7 @@ export class EngineHost {
     if (!this.isDirty(doc)) {
       return { sourceId: DOCUMENT_SOURCE_ID, size: document.size, close: null };
     }
-    if (!this.workersCanRead(doc, 0, doc.pieces.size)) {
-      throw new EngineWorkerError({
-        detail:
-          "Save this document before searching: its sorted or reformatted content cannot be searched until it is saved.",
-      });
-    }
+
     const window = await this.openLogicalWindow(doc);
     return { sourceId: window.sourceId, size: this.docSize(doc), close: window.close };
   }
@@ -2673,6 +2899,126 @@ export class EngineHost {
       limited: outcome.limited,
       status: outcome.status,
     };
+  }
+
+  /** Deep-decode search over `documentId`; keeps plain search zero-regression when off. */
+  async deepSearch(documentId: number, query: DeepSearchQuery): Promise<DeepSearchSummary> {
+    if (!query.deep) {
+      const plain = await this.search(documentId, {
+        mode: query.mode,
+        text: query.text,
+        caseSensitive: query.caseSensitive,
+      });
+      return { ...plain, annotations: [] };
+    }
+    const document = this.document(documentId);
+    const spec = this.searchSpec({
+      mode: query.mode,
+      text: query.text,
+      caseSensitive: query.caseSensitive,
+    });
+    const regex = spec.kind === "regex";
+    const view = await this.searchView(document);
+    const onRegexPool = regex && view.close === null;
+    const pool = onRegexPool ? await this.regexPool(document) : document.pool;
+    const decode = document.format !== "text";
+    const id = this.nextSearchId++;
+    document.currentSearch = id;
+    const outcome = await runDeepSearch(
+      pool,
+      { sourceId: view.sourceId, size: view.size, decode },
+      spec,
+      {
+        chunkBytes: regex
+          ? (this.searchOptions.regexChunkBytes ?? REGEX_CHUNK_BYTES)
+          : (this.searchOptions.literalChunkBytes ?? LITERAL_CHUNK_BYTES),
+        chunk: this.chunkOptions(),
+        budgetMs: regex ? (this.searchOptions.regexBudgetMs ?? REGEX_BUDGET_MS) : null,
+        maxSkipped: REGEX_MAX_SKIPPED,
+        maxRetained: MAX_RETAINED_HITS,
+        workers: onRegexPool ? pool.size - 1 : pool.size,
+        isCancelled: () => document.currentSearch !== id,
+      },
+    );
+    document.searches.set(id, {
+      id,
+      spec,
+      decode,
+      outcome,
+      view,
+      annotations: outcome.annotations,
+    });
+    while (document.searches.size > SEARCH_RECORDS_KEPT) {
+      const oldest = document.searches.keys().next();
+      if (oldest.done) break;
+      this.dropSearch(document, oldest.value);
+    }
+    return {
+      searchId: id,
+      count: outcome.count,
+      retained: outcome.hits.length / 2,
+      retainedUntil: outcome.retainedUntil,
+      skipped: outcome.skipped.map((range) => ({ start: range.start, end: range.end })),
+      limited: outcome.limited,
+      status: outcome.status,
+      annotations: outcome.annotations,
+    };
+  }
+
+  /** Deep-search annotations overlapping `[from, to)`. */
+  deepSearchAnnotations(
+    documentId: number,
+    searchId: number,
+    from: number,
+    to: number,
+  ): ReadonlyArray<DeepHitAnnotation> {
+    const { record } = this.searchRecord(documentId, searchId);
+    const all = record.annotations ?? [];
+    return all.filter((ann) => ann.range.end > from && ann.range.start < to);
+  }
+
+  /** Traces every exact whole-value occurrence of `request.value` across `documentId`. */
+  async traceValue(documentId: number, request: TraceValueRequest): Promise<TraceResult> {
+    const document = this.document(documentId);
+    await document.indexed;
+    const format = document.format === "har" ? "har" : document.format === "text" ? "text" : "json";
+    return traceExactValue(
+      {
+        format,
+        runDeepSearch: async (text) => {
+          const spec = this.searchSpec({ mode: "literal", text, caseSensitive: true });
+          const view = await this.searchView(document);
+          try {
+            return await runDeepSearch(
+              document.pool,
+              { sourceId: view.sourceId, size: view.size, decode: format !== "text" },
+              spec,
+              {
+                chunkBytes: this.searchOptions.literalChunkBytes ?? LITERAL_CHUNK_BYTES,
+                chunk: this.chunkOptions(),
+                budgetMs: null,
+                maxSkipped: REGEX_MAX_SKIPPED,
+                maxRetained: MAX_RETAINED_HITS,
+                workers: document.pool.size,
+                isCancelled: () => false,
+              },
+            );
+          } finally {
+            view.close?.();
+          }
+        },
+        nodeAt: (offset) => this.nodeAt(documentId, offset),
+        readLogicalRange: async (start, end) =>
+          (await this.readLogical(document.doc, start, end)).slice(),
+        keyText: (ref) => this.keyText(ref),
+        entryMeta: async (entryRef) => {
+          const node = await this.node(entryRef);
+          const summary = await this.harEntry({ node, key: null, preview: null });
+          return { method: summary.method, url: summary.url, status: summary.status };
+        },
+      },
+      request.value,
+    );
   }
 
   private searchRecord(documentId: number, searchId: number) {
@@ -2891,7 +3237,7 @@ export class EngineHost {
       for (const input of inputs) {
         for (const selector of segment.selectors) {
           if (out.length >= PATH_MAX_SET) state.complete = false;
-          else await this.selectEdited(input.node, selector, out);
+          else await this.selectEdited(input.node, selector, out, state);
         }
       }
       current = out;
@@ -2921,10 +3267,31 @@ export class EngineHost {
     return out;
   }
 
-  private async selectEdited(node: NodeSummary, selector: Selector, out: PathFound[]) {
+  private async selectEdited(
+    node: NodeSummary,
+    selector: Selector,
+    out: PathFound[],
+    state: { complete: boolean },
+  ) {
     if (!isContainerKind(node.kind)) return;
     const count = node.childCount;
     switch (selector.kind) {
+      case "filter": {
+        const matched: NodeRef[] = [];
+        await evalFilterSelector(
+          this.pathFilterHost(node.ref.documentId),
+          node.ref,
+          selector.expr,
+          matched,
+          state,
+          PATH_MAX_SET - out.length,
+        );
+        for (const ref of matched) {
+          const child = await this.node(ref);
+          out.push({ node: child, label: await this.labelOf(child) });
+        }
+        return;
+      }
       case "wildcard":
         out.push(...(await this.childrenFound(node, 0, count)));
         return;
@@ -3088,6 +3455,63 @@ export class EngineHost {
     return out;
   }
 
+  private pathFilterHost(documentId: number): PathFilterHost {
+    return {
+      rootRef: { documentId, tapeId: 0, token: 0 },
+      nodeInfo: async (ref): Promise<PathNodeInfo> => {
+        const n = await this.node(ref);
+        return { ref: n.ref, kind: n.kind, childCount: n.childCount, key: null };
+      },
+      listChildren: async (ref, from, count, includeKeys): Promise<ReadonlyArray<PathNodeInfo>> => {
+        if (includeKeys) {
+          const page = await this.rows(ref, from, count, 1);
+          return page.rows.map((r) => ({
+            ref: r.node.ref,
+            kind: r.node.kind,
+            childCount: r.node.childCount,
+            key: r.key,
+          }));
+        }
+        const page = await this.children(ref, from, count);
+        return page.nodes.map((n) => ({
+          ref: n.ref,
+          kind: n.kind,
+          childCount: n.childCount,
+          key: null,
+        }));
+      },
+      member: async (ref, name): Promise<PathNodeInfo | null> => {
+        const hit = await this.member(ref, name);
+        return hit === null
+          ? null
+          : {
+              ref: hit.node.ref,
+              kind: hit.node.kind,
+              childCount: hit.node.childCount,
+              key: hit.key,
+            };
+      },
+      readScalar: async (ref): Promise<FilterLiteral | null> => {
+        const { record, token, tapeId } = await this.settled(ref);
+        const kind = record.tape.kind(token);
+        if (isContainer(kind)) return null;
+        if (kind === KIND_NULL) return { kind: "null" };
+        if (kind === KIND_TRUE) return { kind: "boolean", value: true };
+        if (kind === KIND_FALSE) return { kind: "boolean", value: false };
+        if (kind === KIND_NUMBER) {
+          const res = await this.textOf(record, tapeId, token, 256);
+          const value = Number(res.text);
+          return Number.isFinite(value) ? { kind: "number", value } : null;
+        }
+        if (kind === KIND_STRING) {
+          const res = await this.textOf(record, tapeId, token, MAX_SLICE_BYTES);
+          return { kind: "string", value: res.text };
+        }
+        return null;
+      },
+    };
+  }
+
   private async selectChildren(
     document: OpenDocument,
     node: number,
@@ -3095,6 +3519,20 @@ export class EngineHost {
     out: number[],
     state: { complete: boolean },
   ) {
+    if (selector.kind === "filter") {
+      const { tapeId, token } = unpackRef(node);
+      const matched: NodeRef[] = [];
+      await evalFilterSelector(
+        this.pathFilterHost(document.id),
+        { documentId: document.id, tapeId, token },
+        selector.expr,
+        matched,
+        state,
+        PATH_MAX_SET - out.length,
+      );
+      for (const ref of matched) out.push(packRef(ref.tapeId, ref.token));
+      return;
+    }
     const container = this.containerOf(document, node);
     if (container === null) return;
     const count = container.record.tape.childCount(container.token);
@@ -3302,13 +3740,1430 @@ export class EngineHost {
     // The value as it stands, edits applied: jq answers about what the views show.
     const { start, end } = this.logicalSpan(record, token);
     const bytes = end - start;
-    if (bytes > MAX_SLICE_BYTES)
-      throw new JqSubtreeTooLargeError({ bytes, limit: MAX_SLICE_BYTES });
+    if (bytes > MAX_SLICE_BYTES) {
+      const suggested = await this.suggestJqElementPath(ref).catch(() => null);
+      throw new JqSubtreeTooLargeError({
+        bytes,
+        limit: MAX_SLICE_BYTES,
+        suggestedPath: suggested?.path ?? null,
+      });
+    }
     const run = this.platform.runJq;
     if (run === undefined) throw new EngineWorkerError({ detail: "jq is not available here" });
     const input = (await this.readLogical(record.doc, start, end)).slice();
     const result = await run(input, program, timeoutMs, JQ_OUTPUT_LIMIT_BYTES);
     return { ...result, inputBytes: bytes };
+  }
+
+  /** Creates a 2 GB-safe ElementSource over a container node (buckets + logical reads). */
+  async elementSource(ref: NodeRef): Promise<ElementSource> {
+    const { document, record, token, tapeId } = await this.settled(ref);
+    await document.indexed;
+    const summary = this.summary(document, tapeId, record, token);
+    return {
+      containerRef: summary.ref,
+      containerKind: summary.kind,
+      total: summary.childCount,
+      list: async (from, count, includeKeys): Promise<ReadonlyArray<ElementDescriptor>> => {
+        if (includeKeys) {
+          const page = await this.rows(summary.ref, from, count, 1);
+          return page.rows.map((row, idx) => ({
+            index: from + idx,
+            ref: row.node.ref,
+            kind: row.node.kind,
+            key: row.key,
+            start: row.node.span.start,
+            end: row.node.span.end,
+          }));
+        }
+        const page = await this.children(summary.ref, from, count);
+        return page.nodes.map((node, idx) => ({
+          index: from + idx,
+          ref: node.ref,
+          kind: node.kind,
+          key: null,
+          start: node.span.start,
+          end: node.span.end,
+        }));
+      },
+      readLogical: (start, end) => this.readLogical(record.doc, start, end),
+    };
+  }
+
+  /** Streams a container's children in <= 64 MiB logical batches via elementMap. */
+  async mapElements<T>(
+    ref: NodeRef,
+    mapper: (element: ElementSlice, signal: AbortSignal) => Promise<T> | T,
+    options?: ElementMapOptions<T>,
+  ): Promise<ElementMapResult<T>> {
+    const source = await this.elementSource(ref);
+    return elementMap(source, mapper, options);
+  }
+
+  /** Streams a container's children in <= 64 MiB logical batches via elementBatchMap. */
+  async mapElementBatches<T>(
+    ref: NodeRef,
+    mapper: (
+      batch: ElementBatch,
+      signal: AbortSignal,
+    ) => Promise<ReadonlyArray<T>> | ReadonlyArray<T>,
+    options?: ElementMapOptions<T>,
+  ): Promise<ElementMapResult<T>> {
+    const source = await this.elementSource(ref);
+    return elementBatchMap(source, mapper, options);
+  }
+
+  /** Suggests the default array path for element-mode jq (`.log.entries` for HAR, largest top-level array for JSON). */
+  async suggestJqElementPath(ref: NodeRef): Promise<JqSuggestedPath | null> {
+    const { document } = await this.settled(ref);
+    await document.indexed;
+    const target = await this.node(ref);
+    if (target.kind === "array") {
+      return {
+        path: ".",
+        count: target.childCount,
+        bytes: Math.max(0, target.span.end - target.span.start),
+      };
+    }
+    if (target.kind !== "object") return null;
+    if (document.format === "har" && ref.tapeId === 0 && ref.token === 0) {
+      const log = await this.member(target.ref, "log");
+      if (log !== null && log.node.kind === "object") {
+        const entries = await this.member(log.node.ref, "entries");
+        if (entries !== null && entries.node.kind === "array") {
+          return {
+            path: ".log.entries",
+            count: entries.node.childCount,
+            bytes: Math.max(0, entries.node.span.end - entries.node.span.start),
+          };
+        }
+      }
+    }
+    let best: { key: string; count: number; bytes: number } | null = null;
+    const scanCount = Math.min(target.childCount, CHILDREN_PAGE_LIMIT);
+    if (scanCount > 0) {
+      const page = await this.rows(target.ref, 0, scanCount, 1);
+      for (const row of page.rows) {
+        if (row.node.kind !== "array" || row.key === null) continue;
+        const bytes = Math.max(0, row.node.span.end - row.node.span.start);
+        if (
+          best === null ||
+          row.node.childCount > best.count ||
+          (row.node.childCount === best.count && bytes > best.bytes)
+        ) {
+          best = { key: row.key, count: row.node.childCount, bytes };
+        }
+      }
+    }
+    if (best === null) return null;
+    const isSimple = /^[A-Za-z_][A-Za-z0-9_-]*$/.test(best.key);
+    const escaped = best.key.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    return {
+      path: isSimple ? `.${best.key}` : `.["${escaped}"]`,
+      count: best.count,
+      bytes: best.bytes,
+    };
+  }
+
+  /** Runs a jq program per element of a container path via elementMap without whole-doc materialization. */
+  async jqElement(request: Omit<JqElementRequest, "_tag">): Promise<JqElementResult> {
+    const run = this.platform.runJq;
+    if (run === undefined) throw new EngineWorkerError({ detail: "jq is not available here" });
+
+    let effectivePath = request.path?.trim() ?? "";
+    if (effectivePath === "") {
+      const suggested = await this.suggestJqElementPath(request.ref);
+      effectivePath = suggested?.path ?? ".";
+    }
+
+    let containerRef = request.ref;
+    if (effectivePath !== "." && effectivePath !== "$") {
+      const jsonPath = effectivePath.startsWith("$")
+        ? effectivePath
+        : effectivePath.startsWith(".") || effectivePath.startsWith("[")
+          ? `$${effectivePath}`
+          : `$.${effectivePath}`;
+      let segments: ReadonlyArray<Segment>;
+      try {
+        segments = parsePath(jsonPath);
+      } catch (error) {
+        if (error instanceof PathSyntaxError) {
+          throw new InvalidPathError({ path: jsonPath, detail: error.message, at: error.at });
+        }
+        throw error;
+      }
+      const matches = await evalPathExpression(
+        this.pathFilterHost(request.ref.documentId),
+        request.ref,
+        segments,
+        { complete: true },
+        1,
+      );
+      const first = matches[0];
+      if (first === undefined) {
+        throw new NodeNotFoundError({ ref: request.ref });
+      }
+      containerRef = first;
+    }
+
+    const containerMeta = await this.node(containerRef);
+    const trimmedProgram = request.program.trim();
+    const elementProgram =
+      containerMeta.kind === "array"
+        ? trimmedProgram.replace(/^\.\[\]\s*\|\s*(?=\S)/, "")
+        : trimmedProgram;
+
+    const source = await this.elementSource(containerRef);
+    const controller = new AbortController();
+    const chunks: string[] = [];
+    let outputBytes = 0;
+    let truncated = false;
+    let inputBytes = 0;
+
+    if (this.platform.runJqBatch === true) {
+      const batchProgram = `.[] | (${elementProgram})`;
+      const mapped = await elementBatchMap(
+        source,
+        async (batch, signal) => {
+          const out: Array<
+            | { readonly ok: true; readonly output: string; readonly byteLength: number }
+            | { readonly ok: false; readonly message: string; readonly byteLength: number }
+          > = [];
+          if (signal.aborted || batch.items.length === 0) return out;
+          let totalBytes = 2 + Math.max(0, batch.items.length - 1);
+          for (const item of batch.items) totalBytes += item.bytes.byteLength;
+          const packed = new Uint8Array(totalBytes);
+          packed[0] = 0x5b; // '['
+          let offset = 1;
+          for (let i = 0; i < batch.items.length; i++) {
+            if (i > 0) packed[offset++] = 0x2c; // ','
+            const bytes = batch.items[i]!.bytes;
+            packed.set(bytes, offset);
+            offset += bytes.byteLength;
+          }
+          packed[offset] = 0x5d; // ']'
+
+          const batchOutcome = await run(
+            packed,
+            batchProgram,
+            request.timeoutMs,
+            JQ_OUTPUT_LIMIT_BYTES,
+          );
+          if (batchOutcome.status === "ok") {
+            if (batchOutcome.truncated) truncated = true;
+            // Emit batch output once on slot 0 and account byte lengths cleanly across items.
+            for (let i = 0; i < batch.items.length; i++) {
+              out.push({
+                ok: true,
+                output: i === 0 ? batchOutcome.output : "",
+                byteLength: batch.items[i]!.bytes.byteLength,
+              });
+            }
+            return out;
+          }
+
+          // Batch hit an error (e.g. mixed-type element): fall back item-by-item for exact isolation.
+          for (const item of batch.items) {
+            if (signal.aborted) break;
+            const single = await run(
+              item.bytes.slice(),
+              elementProgram,
+              request.timeoutMs,
+              JQ_OUTPUT_LIMIT_BYTES,
+            );
+            if (single.status !== "ok") {
+              out.push({
+                ok: false,
+                message: single.message || `jq stopped with status ${single.status}.`,
+                byteLength: item.bytes.byteLength,
+              });
+            } else {
+              if (single.truncated) truncated = true;
+              out.push({
+                ok: true,
+                output: single.output,
+                byteLength: item.bytes.byteLength,
+              });
+            }
+          }
+          return out;
+        },
+        {
+          batchBytes: 1024 * 1024,
+          concurrency: Math.min(4, request.concurrency ?? 4),
+          includeKeys: false,
+          signal: controller.signal,
+        },
+      );
+
+      const errors: Array<{
+        readonly index: number;
+        readonly key: string | null;
+        readonly bytes: number;
+        readonly message: string;
+      }> = [];
+      let processed = 0;
+      for (const outcome of mapped.results) {
+        if (!outcome.ok) {
+          errors.push(outcome.error);
+          continue;
+        }
+        const item = outcome.value;
+        processed++;
+        inputBytes += item.byteLength;
+        if (!item.ok) {
+          errors.push({
+            index: processed - 1,
+            key: null,
+            bytes: item.byteLength,
+            message: item.message,
+          });
+          continue;
+        }
+        if (item.output.length === 0) continue;
+        const text = item.output.endsWith("\n") ? item.output : `${item.output}\n`;
+        if (outputBytes + text.length <= JQ_OUTPUT_LIMIT_BYTES) {
+          chunks.push(text);
+          outputBytes += text.length;
+        } else {
+          const room = JQ_OUTPUT_LIMIT_BYTES - outputBytes;
+          if (room > 0) {
+            chunks.push(text.slice(0, room));
+            outputBytes += room;
+          }
+          truncated = true;
+          controller.abort();
+          break;
+        }
+      }
+
+      const allErrors = errors.length > 0 ? errors : mapped.errors;
+      const status =
+        allErrors.length === 0
+          ? "ok"
+          : allErrors.length >= processed && chunks.length === 0
+            ? "error"
+            : "partial";
+      const message =
+        allErrors.length === 0
+          ? ""
+          : `${allErrors.length} element${allErrors.length === 1 ? "" : "s"} failed (${allErrors[0]?.message ?? "error"})`;
+
+      return {
+        status,
+        output: chunks.join(""),
+        truncated,
+        message,
+        path: effectivePath,
+        processed,
+        total: mapped.summary.total,
+        errors: allErrors,
+        inputBytes,
+      };
+    }
+
+    const mapped = await elementMap(
+      source,
+      async (slice, signal) => {
+        if (signal.aborted) return "";
+        const outcome = await run(
+          slice.bytes.slice(),
+          elementProgram,
+          request.timeoutMs,
+          JQ_OUTPUT_LIMIT_BYTES,
+        );
+        if (outcome.status !== "ok") {
+          throw new Error(outcome.message || `jq stopped with status ${outcome.status}.`);
+        }
+        if (outcome.truncated) truncated = true;
+        return outcome.output;
+      },
+      {
+        concurrency: request.concurrency ?? 4,
+        includeKeys: false,
+        collectResults: false,
+        signal: controller.signal,
+        onOrderedResult: (outcome) => {
+          if (!outcome.ok) return;
+          inputBytes += outcome.byteLength;
+          const rawOut = outcome.value;
+          if (rawOut.length === 0) return;
+          const out = rawOut.endsWith("\n") ? rawOut : `${rawOut}\n`;
+          if (outputBytes + out.length <= JQ_OUTPUT_LIMIT_BYTES) {
+            chunks.push(out);
+            outputBytes += out.length;
+          } else {
+            const room = JQ_OUTPUT_LIMIT_BYTES - outputBytes;
+            if (room > 0) {
+              chunks.push(out.slice(0, room));
+              outputBytes += room;
+            }
+            truncated = true;
+            controller.abort();
+          }
+        },
+      },
+    );
+
+    const status =
+      mapped.errors.length === 0
+        ? "ok"
+        : mapped.errors.length === mapped.summary.processed && chunks.length === 0
+          ? "error"
+          : "partial";
+    const message =
+      mapped.errors.length === 0
+        ? ""
+        : `${mapped.errors.length} element${mapped.errors.length === 1 ? "" : "s"} failed (${mapped.errors[0]?.message ?? "error"})`;
+
+    return {
+      status,
+      output: chunks.join(""),
+      truncated,
+      message,
+      path: effectivePath,
+      processed: mapped.summary.processed,
+      total: mapped.summary.total,
+      errors: mapped.errors,
+      inputBytes,
+    };
+  }
+
+  /** Packs a contiguous ElementBatch slice into a fresh transferable buffer for scan workers. */
+  private packBatchBuffer(batch: ElementBatch): {
+    readonly buffer: ArrayBuffer;
+    readonly items: ReadonlyArray<{
+      readonly index: number;
+      readonly start: number;
+      readonly end: number;
+    }>;
+  } {
+    const first = batch.items[0];
+    const last = batch.items[batch.items.length - 1];
+    if (first === undefined || last === undefined) {
+      return { buffer: new ArrayBuffer(0), items: [] };
+    }
+    const spanStart = first.bytes.byteOffset;
+    const spanEnd = last.bytes.byteOffset + last.bytes.byteLength;
+    const copy = new Uint8Array(Math.max(0, spanEnd - spanStart));
+    copy.set(new Uint8Array(first.bytes.buffer, spanStart, copy.byteLength));
+    return {
+      buffer: copy.buffer,
+      items: batch.items.map((item) => ({
+        index: item.index,
+        start: item.bytes.byteOffset - spanStart,
+        end: item.bytes.byteOffset + item.bytes.byteLength - spanStart,
+      })),
+    };
+  }
+
+  private async readLogicalBounded(doc: Doc, limit: number): Promise<Uint8Array> {
+    const size = this.docSize(doc);
+    if (size > limit) throw new SliceTooLargeError({ bytes: size, limit });
+    const out = new Uint8Array(size);
+    for (let at = 0; at < size; at += MAX_SLICE_BYTES) {
+      const end = Math.min(size, at + MAX_SLICE_BYTES);
+      out.set(await this.readLogical(doc, at, end), at);
+    }
+    return out;
+  }
+
+  private async findHarEntriesRef(documentId: number): Promise<NodeRef | null> {
+    const rootRef: NodeRef = { documentId, tapeId: 0, token: 0 };
+    const rootNode = await this.node(rootRef);
+    if (rootNode.kind !== "object") return null;
+    const log = await this.member(rootRef, "log");
+    if (log === null || log.node.kind !== "object") return null;
+    const entries = await this.member(log.node.ref, "entries");
+    if (entries === null || entries.node.kind !== "array") return null;
+    return entries.node.ref;
+  }
+
+  private async compareStructural(
+    aDocumentId: number,
+    bDocumentId: number,
+  ): Promise<StructuralDiffResult> {
+    const docA = this.document(aDocumentId);
+    const docB = this.document(bDocumentId);
+    await Promise.all([this.ready(docA), this.ready(docB)]);
+    const sizeA = this.docSize(docA.doc);
+    const sizeB = this.docSize(docB.doc);
+    if (sizeA > MAX_STRUCTURAL_DIFF_BYTES) {
+      throw new DiffTooLargeError({
+        bytes: sizeA,
+        limit: MAX_STRUCTURAL_DIFF_BYTES,
+        detail: `Document A (${sizeA} bytes) exceeds the 256 MiB structural diff limit. Use HAR entry diff for multi-GB HAR captures.`,
+      });
+    }
+    if (sizeB > MAX_STRUCTURAL_DIFF_BYTES) {
+      throw new DiffTooLargeError({
+        bytes: sizeB,
+        limit: MAX_STRUCTURAL_DIFF_BYTES,
+        detail: `Document B (${sizeB} bytes) exceeds the 256 MiB structural diff limit. Use HAR entry diff for multi-GB HAR captures.`,
+      });
+    }
+    const [bytesA, bytesB] = await Promise.all([
+      this.readLogicalBounded(docA.doc, MAX_STRUCTURAL_DIFF_BYTES),
+      this.readLogicalBounded(docB.doc, MAX_STRUCTURAL_DIFF_BYTES),
+    ]);
+    return diffJsonBytes(bytesA, bytesB);
+  }
+
+  /**
+   * Builds bounded byte-window tasks (`<= 8 MiB` step chunks) over `.log.entries` for a
+   * clean unedited tape-0 container using its eager `BucketAnchors` (or inline children).
+   * Returns `null` when the container is empty or not cleanly anchor/tape-0 accessible.
+   */
+  private planHarArrayWindows(
+    doc: OpenDocument,
+    entriesRef: NodeRef,
+    maxRows?: number,
+  ): Array<{
+    readonly baseIndex: number;
+    readonly expectedCount: number;
+    readonly start: number;
+    readonly end: number;
+  }> | null {
+    if (doc.syntax !== null || this.isDirty(doc.doc) || doc.display?.sameOffsets === true)
+      return null;
+    if (entriesRef.tapeId !== 0) return null;
+    const record = doc.tapes.get(0);
+    if (!record) return null;
+    const token = entriesRef.token;
+    if (record.tape.kind(token) !== KIND_ARRAY) return null;
+    const totalChildren = record.tape.childCount(token);
+    const limit = maxRows !== undefined ? Math.min(totalChildren, maxRows) : totalChildren;
+    if (limit <= 0) return [];
+
+    const anchors = record.anchors.get(token);
+    const windows: Array<{
+      readonly baseIndex: number;
+      readonly expectedCount: number;
+      readonly start: number;
+      readonly end: number;
+    }> = [];
+    const targetWindowBytes = 10 * 1024 * 1024;
+
+    if (anchors && anchors.index.length > 0) {
+      const arrayEnd = Math.max(0, record.tape.end(token) - 1);
+      let b = 0;
+      while (b < anchors.index.length) {
+        const baseIndex = anchors.index[b] as number;
+        if (baseIndex >= limit) break;
+        const start = anchors.offset[b] as number;
+        let endBucket = b;
+        while (endBucket + 1 < anchors.index.length) {
+          const nextIdx = anchors.index[endBucket + 1] as number;
+          if (nextIdx >= limit) break;
+          const nextOffset = anchors.offset[endBucket + 1] as number;
+          if (nextOffset - start > targetWindowBytes && endBucket >= b) break;
+          endBucket++;
+        }
+        const nextBucket = endBucket + 1;
+        const nextIdx =
+          nextBucket < anchors.index.length ? (anchors.index[nextBucket] as number) : totalChildren;
+        if (nextIdx > limit) {
+          // Partial last bucket capped at `maxRows`: stop cleanly via exact children if ever clipped.
+          return null;
+        }
+        const end =
+          nextBucket < anchors.offset.length ? (anchors.offset[nextBucket] as number) : arrayEnd;
+        windows.push({
+          baseIndex,
+          expectedCount: nextIdx - baseIndex,
+          start,
+          end,
+        });
+        b = nextBucket;
+      }
+      // LPT scheduling: start largest byte-span buckets first so stragglers never tail the pool.
+      windows.sort((a, b) => b.end - b.start - (a.end - a.start));
+      return windows;
+    }
+
+    // Inline children on tape 0 (smaller captures without anchors)
+    let c = firstChild(record.tape, token);
+    let idx = 0;
+    while (c >= 0 && idx < limit) {
+      const baseIndex = idx;
+      const start = record.tape.start(c);
+      let end = record.tape.end(c);
+      let count = 1;
+      c = record.tape.next(c);
+      idx++;
+      while (c >= 0 && idx < limit) {
+        const nextEnd = record.tape.end(c);
+        if (nextEnd - start > targetWindowBytes) break;
+        end = nextEnd;
+        count++;
+        c = record.tape.next(c);
+        idx++;
+      }
+      windows.push({ baseIndex, expectedCount: count, start, end });
+    }
+    return windows;
+  }
+
+  private async findObjectMembers(
+    ref: NodeRef,
+    wantedKeys: ReadonlySet<string>,
+    sharedSlice?: { readonly bytes: Uint8Array; readonly base: number; readonly sourceId: number },
+  ): Promise<Map<string, NodeSummary> | null> {
+    const { document, record, token, tapeId } = await this.settled(ref, true);
+    if (this.cutOf(document, record) !== null || record.tape.kind(token) !== KIND_OBJECT) {
+      return null;
+    }
+    const childCount = record.tape.childCount(token);
+    if (childCount === 0) return new Map();
+    if (firstChild(record.tape, token) < 0) return null;
+
+    const base = record.tape.start(token);
+    const containerEnd = record.tape.end(token);
+    let windowStart = base;
+    let windowEnd = Math.min(containerEnd, base + ROWS_WINDOW_BYTES, record.size);
+    let window: Uint8Array | null = null;
+    if (
+      sharedSlice !== undefined &&
+      record.sourceId === sharedSlice.sourceId &&
+      base >= sharedSlice.base &&
+      base < sharedSlice.base + sharedSlice.bytes.byteLength
+    ) {
+      window = sharedSlice.bytes;
+      windowStart = sharedSlice.base;
+      windowEnd = sharedSlice.base + sharedSlice.bytes.byteLength;
+    } else if (windowEnd > base) {
+      window = await this.read(record, base, windowEnd);
+    }
+
+    const found = new Map<string, NodeSummary>();
+    const deferred: Array<{ readonly node: NodeSummary; readonly childRecord: TapeRecord }> = [];
+
+    let c = firstChild(record.tape, token);
+    while (c >= 0) {
+      const node = this.summary(document, tapeId, record, c);
+      c = record.tape.next(c);
+      if (node.key === null) continue;
+      const childRecord = document.tapes.get(node.ref.tapeId) ?? record;
+      if (
+        window !== null &&
+        childRecord.sourceId === record.sourceId &&
+        node.key >= windowStart &&
+        node.key < windowEnd
+      ) {
+        const keyEnd = stringEnd(window, node.key - windowStart);
+        if (keyEnd >= 0) {
+          const key = decodeString(window, node.key - windowStart, keyEnd, MAX_KEY_BYTES);
+          if (wantedKeys.has(key) && !found.has(key)) {
+            found.set(key, node);
+            if (found.size === wantedKeys.size) return found;
+          }
+          continue;
+        }
+      }
+      deferred.push({ node, childRecord });
+    }
+
+    if (deferred.length > 0 && found.size < wantedKeys.size) {
+      const resolved = await Promise.all(
+        deferred.map(async ({ node, childRecord }) => {
+          const keyStart = node.key as number;
+          const miniEnd = Math.min(childRecord.size, keyStart + 64);
+          const mini = await this.read(childRecord, keyStart, miniEnd);
+          const end = stringEnd(mini, 0);
+          const key =
+            end >= 0
+              ? decodeString(mini, 0, end, MAX_KEY_BYTES)
+              : await this.keyAt(document, childRecord, keyStart);
+          return { key, node };
+        }),
+      );
+      for (const { key, node } of resolved) {
+        if (wantedKeys.has(key) && !found.has(key)) {
+          found.set(key, node);
+        }
+      }
+    }
+    return found;
+  }
+
+  private async resolveOneHarEntryCellRefs(
+    document: OpenDocument,
+    entryNode: NodeSummary,
+    docClean: boolean,
+    batchSlice?: { readonly bytes: Uint8Array; readonly base: number; readonly sourceId: number },
+  ): Promise<HarEntryCellRefs | null> {
+    let slice = batchSlice;
+    if (slice === undefined && docClean) {
+      const entryRecord = document.tapes.get(entryNode.ref.tapeId);
+      const len = entryNode.range.end - entryNode.range.start;
+      if (entryRecord && len > 0 && len <= 512 * 1024) {
+        const bytes = await this.read(entryRecord, entryNode.range.start, entryNode.range.end);
+        slice = { bytes, base: entryNode.range.start, sourceId: entryRecord.sourceId };
+      }
+    }
+
+    const top = await this.findObjectMembers(entryNode.ref, HAR_ENTRY_REF_KEYS, slice);
+    if (top === null) return null;
+    const reqNode = top.get("request");
+    const respNode = top.get("response");
+    const timeNode = top.get("time");
+
+    const [reqMap, respMap] = await Promise.all([
+      reqNode && reqNode.kind === "object"
+        ? this.findObjectMembers(reqNode.ref, HAR_REQ_REF_KEYS, slice)
+        : Promise.resolve(new Map<string, NodeSummary>()),
+      respNode && respNode.kind === "object"
+        ? this.findObjectMembers(respNode.ref, HAR_RESP_REF_KEYS, slice)
+        : Promise.resolve(new Map<string, NodeSummary>()),
+    ]);
+    if (reqMap === null || respMap === null) return null;
+
+    const contentNode = respMap.get("content");
+    const contentMap =
+      contentNode && contentNode.kind === "object"
+        ? await this.findObjectMembers(contentNode.ref, HAR_CONTENT_REF_KEYS, slice)
+        : new Map<string, NodeSummary>();
+    if (contentMap === null) return null;
+
+    const scalarRef = (n: NodeSummary | undefined): NodeRef | null =>
+      n && n.kind !== "object" && n.kind !== "array" ? n.ref : null;
+
+    return {
+      methodRef: scalarRef(reqMap.get("method")),
+      urlRef: scalarRef(reqMap.get("url")),
+      statusRef: scalarRef(respMap.get("status")),
+      mimeTypeRef: scalarRef(contentMap.get("mimeType")),
+      bodySizeRef: scalarRef(contentMap.get("size")) ?? scalarRef(respMap.get("bodySize")),
+      timeMsRef: scalarRef(timeNode),
+    };
+  }
+
+  private async resolveHarRowsBatch(
+    targetRef: NodeRef,
+    rowIndices: ReadonlyArray<number>,
+  ): Promise<ReadonlyArray<ResolvedHarRowBatchItem | null> | null> {
+    if (rowIndices.length === 0) return [];
+    const { document, record, token, tapeId } = await this.settled(targetRef, true);
+    if (this.cutOf(document, record) !== null || record.tape.kind(token) !== KIND_ARRAY) {
+      return null;
+    }
+    let total = record.tape.childCount(token);
+    if (total > 0 && !document.live.done && firstChild(record.tape, token) < 0) {
+      await this.ready(document);
+      total = record.tape.childCount(token);
+    }
+    total = this.visibleChildren(document, record, token, total);
+
+    const entryNodes: Array<NodeSummary | undefined> = Array.from({ length: rowIndices.length });
+    if (firstChild(record.tape, token) >= 0) {
+      const wanted = new Map<number, number[]>();
+      for (let i = 0; i < rowIndices.length; i++) {
+        const idx = rowIndices[i] as number;
+        if (idx >= 0 && idx < total) {
+          let list = wanted.get(idx);
+          if (!list) {
+            list = [];
+            wanted.set(idx, list);
+          }
+          list.push(i);
+        }
+      }
+      const sortedTargets = [...wanted.keys()].sort((a, b) => a - b);
+      if (sortedTargets.length > 0) {
+        let cursor = 0;
+        let child = this.skipTo(record, token, sortedTargets[0] as number);
+        let at = sortedTargets[0] as number;
+        while (child >= 0 && cursor < sortedTargets.length) {
+          const targetIdx = sortedTargets[cursor] as number;
+          if (at === targetIdx) {
+            const summary = this.summary(document, tapeId, record, child);
+            for (const slot of wanted.get(targetIdx) as number[]) {
+              entryNodes[slot] = summary;
+            }
+            cursor++;
+          }
+          child = record.tape.next(child);
+          at++;
+        }
+      }
+    } else {
+      const anchors = record.anchors.get(token);
+      if (!anchors || anchors.index.length === 0) return null;
+      const byBucket = new Map<
+        number,
+        Array<{ readonly rowIndex: number; readonly slot: number }>
+      >();
+      for (let slot = 0; slot < rowIndices.length; slot++) {
+        const rowIndex = rowIndices[slot] as number;
+        if (rowIndex < 0 || rowIndex >= total) continue;
+        const b = upperBound(anchors.index, rowIndex) - 1;
+        let list = byBucket.get(b);
+        if (!list) {
+          list = [];
+          byBucket.set(b, list);
+        }
+        list.push({ rowIndex, slot });
+      }
+      const distinctBuckets = [...byBucket.keys()];
+      const bucketIds = await Promise.all(
+        distinctBuckets.map((b) => this.bucketTape(document, tapeId, record, token, b)),
+      );
+      for (let bi = 0; bi < distinctBuckets.length; bi++) {
+        const b = distinctBuckets[bi] as number;
+        const bTapeId = bucketIds[bi] as number;
+        const bRecord = document.tapes.get(bTapeId) as TapeRecord;
+        const bucketBase = anchors.index[b] as number;
+        const items = byBucket.get(b)!;
+        items.sort((a, c) => a.rowIndex - c.rowIndex);
+        let root = bRecord.tape.count > 0 ? 0 : -1;
+        let pos = 0;
+        for (const item of items) {
+          const wantSkip = item.rowIndex - bucketBase;
+          while (pos < wantSkip && root >= 0) {
+            root = bRecord.tape.next(root);
+            pos++;
+          }
+          if (root < 0) break;
+          entryNodes[item.slot] = this.summary(document, bTapeId, bRecord, root);
+        }
+      }
+    }
+
+    const docClean = !this.isDirty(document.doc) && document.syntax === null;
+    let batchSlice:
+      | { readonly bytes: Uint8Array; readonly base: number; readonly sourceId: number }
+      | undefined;
+    if (docClean) {
+      let minStart = Number.POSITIVE_INFINITY;
+      let maxEnd = 0;
+      for (const node of entryNodes) {
+        if (!node || node.kind !== "object") continue;
+        const rec = document.tapes.get(node.ref.tapeId);
+        if (!rec || rec.sourceId !== record.sourceId) continue;
+        if (node.range.start < minStart) minStart = node.range.start;
+        if (node.range.end > maxEnd) maxEnd = node.range.end;
+      }
+      if (maxEnd > minStart && maxEnd - minStart <= 4 * 1024 * 1024) {
+        const bytes = await this.read(record, minStart, maxEnd);
+        batchSlice = { bytes, base: minStart, sourceId: record.sourceId };
+      }
+    }
+
+    return Promise.all(
+      entryNodes.map(async (node) => {
+        if (!node) return null;
+        if (node.kind !== "object") {
+          return { node, refs: EMPTY_HAR_CELL_REFS };
+        }
+        const refs = await this.resolveOneHarEntryCellRefs(document, node, docClean, batchSlice);
+        return refs === null ? null : { node, refs };
+      }),
+    );
+  }
+
+  private async readHarEntriesFast(
+    documentId: number,
+    targetRef: NodeRef,
+    totalRows: number,
+  ): Promise<HarTableColumnarData | null> {
+    const doc = this.document(documentId);
+    await this.ready(doc);
+    const windows = this.planHarArrayWindows(doc, targetRef, totalRows);
+    if (windows === null) return null;
+    if (windows.length === 0) {
+      return {
+        count: 0,
+        nums: new Float64Array(0),
+        methods: [],
+        urls: [],
+        mimeTypes: [],
+        startedDateTimes: [],
+      };
+    }
+
+    const nums = new Float64Array(totalRows * HAR_COL_STRIDE);
+    nums.fill(Number.NaN);
+    const methods = Array.from<string | null>({ length: totalRows }).fill(null);
+    const urls = Array.from<string | null>({ length: totalRows }).fill(null);
+    const mimeTypes = Array.from<string | null>({ length: totalRows }).fill(null);
+    const startedDateTimes = Array.from<string | null>({ length: totalRows }).fill(null);
+    const workers = Math.max(1, doc.pool.size);
+    const workerCount = Math.min(workers, windows.length);
+    let nextWindow = 0;
+
+    await Promise.all(
+      Array.from({ length: workerCount }, async (_, workerId) => {
+        const wid = workers - 1 - (workerId % workers);
+        while (nextWindow < windows.length) {
+          const w = windows[nextWindow++]!;
+          const res = await doc.pool.call<HarTableColumnarWindowResult>(wid, {
+            type: "harTableWindow",
+            sourceId: DOCUMENT_SOURCE_ID,
+            start: w.start,
+            end: w.end,
+            baseIndex: w.baseIndex,
+            expectedCount: w.expectedCount,
+            stepBytes: 8 * 1024 * 1024,
+          });
+          if (res.count !== w.expectedCount) continue;
+          const copyCount = Math.min(res.count, totalRows - w.baseIndex);
+          if (copyCount <= 0) continue;
+          nums.set(res.nums.subarray(0, copyCount * HAR_COL_STRIDE), w.baseIndex * HAR_COL_STRIDE);
+          for (let k = 0; k < copyCount; k++) {
+            const dst = w.baseIndex + k;
+            methods[dst] = res.methods[k] ?? null;
+            urls[dst] = res.urls[k] ?? null;
+            mimeTypes[dst] = res.mimeTypes[k] ?? null;
+            startedDateTimes[dst] = res.startedDateTimes[k] ?? null;
+          }
+        }
+      }),
+    );
+
+    return { count: totalRows, nums, methods, urls, mimeTypes, startedDateTimes };
+  }
+
+  private async hashRangeInWorker(
+    doc: OpenDocument,
+    sourceId: number,
+    workerId: number,
+    range: { readonly start: number; readonly end: number },
+  ): Promise<bigint> {
+    const res = await doc.pool.call<HashSourceRangeResult>(workerId, {
+      type: "hashSourceRange",
+      sourceId,
+      start: range.start,
+      end: range.end,
+      stepBytes: 8 * 1024 * 1024,
+    });
+    return res.hash;
+  }
+
+  private async extractOversizedHarPrint(
+    documentId: number,
+    doc: OpenDocument,
+    entriesRef: NodeRef,
+    sourceId: number,
+    entryIndex: number,
+    spanStart: number,
+    spanEnd: number,
+  ): Promise<HarEntryPrint> {
+    const readTextSmall = async (ref: NodeRef): Promise<string> => {
+      const tv = await this.text(ref, 65536);
+      return tv.text;
+    };
+    const page = await this.children(entriesRef, entryIndex, 1);
+    const entryNode = page.nodes[0];
+    if (entryNode === undefined || entryNode.kind !== "object") {
+      const fallbackDigest = await this.hashRangeInWorker(
+        doc,
+        sourceId,
+        entryIndex % Math.max(1, doc.pool.size),
+        {
+          start: spanStart,
+          end: spanEnd,
+        },
+      );
+      return {
+        entryIndex,
+        matchKey: "",
+        method: "",
+        url: "",
+        resourceType: "",
+        status: 0,
+        headersHash: 0n,
+        queryHash: 0n,
+        postDataHash: 0n,
+        bodyHash: fallbackDigest,
+      };
+    }
+
+    const fallbackDigest = await this.hashRangeInWorker(
+      doc,
+      sourceId,
+      entryIndex % Math.max(1, doc.pool.size),
+      { start: spanStart, end: spanEnd },
+    );
+    const [reqRow, respRow] = await Promise.all([
+      this.member(entryNode.ref, "request"),
+      this.member(entryNode.ref, "response"),
+    ]);
+    let method = "";
+    let url = "";
+    let status = 0;
+    if (reqRow && reqRow.node.kind === "object") {
+      const [mRow, uRow] = await Promise.all([
+        this.member(reqRow.node.ref, "method"),
+        this.member(reqRow.node.ref, "url"),
+      ]);
+      if (mRow && mRow.node.kind === "string") method = await readTextSmall(mRow.node.ref);
+      if (uRow && uRow.node.kind === "string") url = await readTextSmall(uRow.node.ref);
+    }
+    if (respRow && respRow.node.kind === "object") {
+      const sRow = await this.member(respRow.node.ref, "status");
+      if (sRow && sRow.node.kind === "number") {
+        const n = Number(await readTextSmall(sRow.node.ref));
+        if (Number.isFinite(n) && n >= 0) status = Math.trunc(n);
+      }
+    }
+    return {
+      entryIndex,
+      matchKey: `${method}\0${url}`,
+      method,
+      url,
+      resourceType: "",
+      status,
+      headersHash: 0n,
+      queryHash: 0n,
+      postDataHash: 0n,
+      bodyHash: fallbackDigest,
+    };
+  }
+
+  private async extractHarPrints(documentId: number): Promise<ReadonlyArray<HarEntryPrint>> {
+    const doc = this.document(documentId);
+    await this.ready(doc);
+
+    if (!this.isDirty(doc.doc) && doc.harPrintsCache !== null) {
+      return doc.harPrintsCache;
+    }
+
+    const compute = async (): Promise<ReadonlyArray<HarEntryPrint>> => {
+      const entriesRef = await this.findHarEntriesRef(documentId);
+      if (entriesRef === null) {
+        return this.isDirty(doc.doc) ? [] : extractHarPrintsStreaming(doc.source);
+      }
+
+      const workers = Math.max(1, doc.pool.size);
+      const windows = this.planHarArrayWindows(doc, entriesRef);
+      if (windows !== null) {
+        if (windows.length === 0) return [];
+        const entryMeta = await this.node(entriesRef);
+        const total = entryMeta.childCount;
+        const prints = Array.from<HarEntryPrint | null>({ length: total }).fill(null);
+        const oversizedList: Array<{
+          readonly entryIndex: number;
+          readonly start: number;
+          readonly end: number;
+        }> = [];
+        const fallbackWindows: Array<{
+          readonly baseIndex: number;
+          readonly expectedCount: number;
+        }> = [];
+
+        let nextWindow = 0;
+        const workerCount = Math.min(workers, windows.length);
+        await Promise.all(
+          Array.from({ length: workerCount }, async (_, workerId) => {
+            while (nextWindow < windows.length) {
+              const w = windows[nextWindow++]!;
+              const res = await doc.pool.call<HarPrintWindowResult>(workerId, {
+                type: "harPrintWindow",
+                sourceId: DOCUMENT_SOURCE_ID,
+                start: w.start,
+                end: w.end,
+                baseIndex: w.baseIndex,
+                stepBytes: 8 * 1024 * 1024,
+              });
+              if (res.prints.length !== w.expectedCount) {
+                fallbackWindows.push({ baseIndex: w.baseIndex, expectedCount: w.expectedCount });
+                continue;
+              }
+              for (let k = 0; k < res.prints.length && w.baseIndex + k < total; k++) {
+                prints[w.baseIndex + k] = res.prints[k] ?? null;
+              }
+              for (const ov of res.oversized) oversizedList.push(ov);
+            }
+          }),
+        );
+
+        for (const fw of fallbackWindows) {
+          for (let offset = 0; offset < fw.expectedCount; offset++) {
+            const idx = fw.baseIndex + offset;
+            const p = await this.children(entriesRef, idx, 1);
+            const node = p.nodes[0];
+            if (!node) continue;
+            oversizedList.push({ entryIndex: idx, start: node.span.start, end: node.span.end });
+          }
+        }
+
+        if (oversizedList.length > 0) {
+          await Promise.all(
+            oversizedList.map(async (ov) => {
+              const len = ov.end - ov.start;
+              if (len <= MAX_SLICE_BYTES && len > 0) {
+                const slice = await this.readLogical(doc.doc, ov.start, ov.end);
+                prints[ov.entryIndex] = extractHarEntryPrintFromSlice(slice, ov.entryIndex);
+              } else {
+                prints[ov.entryIndex] = await this.extractOversizedHarPrint(
+                  documentId,
+                  doc,
+                  entriesRef,
+                  DOCUMENT_SOURCE_ID,
+                  ov.entryIndex,
+                  ov.start,
+                  ov.end,
+                );
+              }
+            }),
+          );
+        }
+
+        return prints.filter((p): p is HarEntryPrint => p !== null);
+      }
+
+      // Edited/JSONC/partial captures: stream via openLogicalWindow (or file source) + element spans.
+      const dirty = this.isDirty(doc.doc);
+      const win = dirty ? await this.openLogicalWindow(doc.doc) : null;
+      const sourceId = win ? win.sourceId : DOCUMENT_SOURCE_ID;
+      try {
+        const entryMeta = await this.node(entriesRef);
+        const total = entryMeta.childCount;
+        if (total === 0) return [];
+        const spans: Array<{
+          readonly index: number;
+          readonly start: number;
+          readonly end: number;
+        }> = [];
+        for (let from = 0; from < total; from += CHILDREN_PAGE_LIMIT) {
+          const page = await this.children(
+            entriesRef,
+            from,
+            Math.min(CHILDREN_PAGE_LIMIT, total - from),
+          );
+          for (let k = 0; k < page.nodes.length; k++) {
+            const n = page.nodes[k]!;
+            spans.push({ index: from + k, start: n.span.start, end: n.span.end });
+          }
+        }
+        const prints = Array.from<HarEntryPrint | null>({ length: spans.length }).fill(null);
+        const batchTargetBytes = 4 * 1024 * 1024;
+        const sliceBatches: Array<
+          Array<{ readonly index: number; readonly start: number; readonly end: number }>
+        > = [];
+        let cur: Array<{ readonly index: number; readonly start: number; readonly end: number }> =
+          [];
+        let curStart = 0;
+        for (const s of spans) {
+          if (cur.length > 0 && (s.end - curStart > batchTargetBytes || cur.length >= 256)) {
+            sliceBatches.push(cur);
+            cur = [];
+          }
+          if (cur.length === 0) curStart = s.start;
+          cur.push(s);
+        }
+        if (cur.length > 0) sliceBatches.push(cur);
+
+        const oversizedList: Array<{
+          readonly entryIndex: number;
+          readonly start: number;
+          readonly end: number;
+        }> = [];
+        let nextBatch = 0;
+        const workerCount = Math.min(workers, sliceBatches.length);
+        await Promise.all(
+          Array.from({ length: workerCount }, async (_, workerId) => {
+            while (nextBatch < sliceBatches.length) {
+              const items = sliceBatches[nextBatch++]!;
+              const res = await doc.pool.call<HarPrintWindowResult>(workerId, {
+                type: "harPrintSlices",
+                sourceId,
+                items,
+              });
+              for (let k = 0; k < items.length; k++) {
+                prints[items[k]!.index] = res.prints[k] ?? null;
+              }
+              for (const ov of res.oversized) oversizedList.push(ov);
+            }
+          }),
+        );
+        for (const ov of oversizedList) {
+          prints[ov.entryIndex] = await this.extractOversizedHarPrint(
+            documentId,
+            doc,
+            entriesRef,
+            sourceId,
+            ov.entryIndex,
+            ov.start,
+            ov.end,
+          );
+        }
+        return prints.filter((p): p is HarEntryPrint => p !== null);
+      } finally {
+        win?.close();
+      }
+    };
+
+    if (!this.isDirty(doc.doc)) {
+      const promise = compute().catch((err) => {
+        if (doc.harPrintsCache === promise) doc.harPrintsCache = null;
+        throw err;
+      });
+      doc.harPrintsCache = promise;
+      return promise;
+    }
+    return compute();
+  }
+
+  private async compareHar(
+    aDocumentId: number,
+    bDocumentId: number,
+    reference: "a" | "b",
+  ): Promise<HarDiffSummary> {
+    // Wait for both captures to settle, then fingerprint sequentially so 2 pools don't double-allocate buffers or contend.
+    await this.ready(this.document(aDocumentId));
+    await this.ready(this.document(bDocumentId));
+    const aPrints = await this.extractHarPrints(aDocumentId);
+    const bPrints = await this.extractHarPrints(bDocumentId);
+    return diffHarCaptures(aPrints, bPrints, { reference });
+  }
+
+  private async readHarEntrySlice(
+    documentId: number,
+    entryIndex: number | null,
+  ): Promise<Uint8Array | null> {
+    if (entryIndex === null) return null;
+    const doc = this.document(documentId);
+    await this.ready(doc);
+    const entriesRef = await this.findHarEntriesRef(documentId);
+    if (entriesRef === null) return null;
+    const page = await this.children(entriesRef, entryIndex, 1);
+    const entry = page.nodes[0];
+    if (entry === undefined) return null;
+    const size = Math.max(0, entry.span.end - entry.span.start);
+    if (size > MAX_SLICE_BYTES) return null;
+    return this.readLogical(doc.doc, entry.span.start, entry.span.end);
+  }
+
+  private async compareHarEntryBody(
+    aDocumentId: number,
+    aEntryIndex: number | null,
+    bDocumentId: number,
+    bEntryIndex: number | null,
+  ): Promise<StructuralDiffResult> {
+    const [aSlice, bSlice] = await Promise.all([
+      this.readHarEntrySlice(aDocumentId, aEntryIndex),
+      this.readHarEntrySlice(bDocumentId, bEntryIndex),
+    ]);
+    return diffHarEntryBodies(aSlice, bSlice);
+  }
+
+  private async inferSchema(ref: NodeRef, options?: Partial<InferOptions>): Promise<Shape> {
+    const opts: InferOptions = {
+      maxEnum: options?.maxEnum ?? DEFAULT_MAX_ENUM,
+      maxDepth: options?.maxDepth ?? DEFAULT_MAX_INFER_DEPTH,
+    };
+    return this.inferNodeShape(ref, opts, 0);
+  }
+
+  private async inferNodeShape(ref: NodeRef, options: InferOptions, depth: number): Promise<Shape> {
+    const { document, record, token } = await this.settled(ref);
+    await this.ready(document);
+    const { start, end } = this.logicalSpan(record, token);
+    const bytes = Math.max(0, end - start);
+    if (bytes <= MAX_SLICE_BYTES) {
+      const slice = await this.readLogical(record.doc, start, end);
+      return inferJsonSlice(slice, options);
+    }
+    if (depth >= options.maxDepth) return emptyShape();
+    const node = await this.node(ref);
+    if (node.kind === "array") {
+      let itemsShape = emptyShape();
+      let workerCursor = 0;
+      const workers = Math.max(1, document.pool.size);
+      const mapped = await this.mapElementBatches<Shape | null>(
+        ref,
+        async (batch) => {
+          if (batch.items.length === 0) return [];
+          const packed = this.packBatchBuffer(batch);
+          const worker = workerCursor++ % workers;
+          const batchShape = await document.pool.call<Shape>(
+            worker,
+            {
+              type: "inferBatch",
+              buffer: packed.buffer,
+              items: packed.items.map(({ start: s, end: e }) => ({ start: s, end: e })),
+              options,
+            },
+            [packed.buffer],
+          );
+          const out: Array<Shape | null> = Array.from({ length: batch.items.length }, () => null);
+          out[0] = batchShape;
+          return out;
+        },
+        {
+          concurrency: workers,
+          includeKeys: false,
+          collectResults: false,
+          onOrderedResult: (outcome) => {
+            if (outcome.ok && outcome.value !== null) {
+              itemsShape = mergeShape(itemsShape, outcome.value, options);
+            }
+          },
+        },
+      );
+      for (const err of mapped.errors) {
+        const page = await this.children(ref, err.index, 1);
+        const oversized = page.nodes[0];
+        if (oversized !== undefined) {
+          itemsShape = mergeShape(
+            itemsShape,
+            await this.inferNodeShape(oversized.ref, options, depth + 1),
+            options,
+          );
+        }
+      }
+      return {
+        samples: 1,
+        nulls: 0,
+        bools: 0,
+        integers: 0,
+        floats: 0,
+        string: null,
+        array: {
+          count: 1,
+          minLen: node.childCount,
+          maxLen: node.childCount,
+          items: itemsShape,
+        },
+        object: null,
+      };
+    }
+    if (node.kind === "object") {
+      const fields: FieldShape[] = [];
+      for (let from = 0; from < node.childCount; from += CHILDREN_PAGE_LIMIT) {
+        const count = Math.min(CHILDREN_PAGE_LIMIT, node.childCount - from);
+        const page = await this.rows(ref, from, count, 1);
+        for (const row of page.rows) {
+          if (row.key === null) continue;
+          const childShape = await this.inferNodeShape(row.node.ref, options, depth + 1);
+          fields.push({ name: row.key, present: 1, shape: childShape });
+        }
+      }
+      return {
+        samples: 1,
+        nulls: 0,
+        bools: 0,
+        integers: 0,
+        floats: 0,
+        string: null,
+        array: null,
+        object: { count: 1, fields },
+      };
+    }
+    throw new SliceTooLargeError({ bytes, limit: MAX_SLICE_BYTES });
+  }
+
+  private async validateSchema(
+    documentId: number,
+    schemaText: string,
+    filter?: HarValidationFilter | null,
+  ): Promise<ValidationResult> {
+    let schema: LocalSchema;
+    try {
+      schema = parseSchema(schemaText);
+    } catch (error) {
+      if (error instanceof SchemaParseError) throw error.toContractError();
+      throw error;
+    }
+    const doc = this.document(documentId);
+    await this.ready(doc);
+
+    if (doc.format === "har" && filter !== null && filter !== undefined) {
+      const entriesRef = await this.findHarEntriesRef(documentId);
+      if (entriesRef === null) {
+        return { valid: true, failures: [], truncated: false, checkedEntries: 0 };
+      }
+      const failures: SchemaFailure[] = [];
+      let checkedEntries = 0;
+      const controller = new AbortController();
+      await this.mapElementBatches<ValidationResult>(
+        entriesRef,
+        (batch) => {
+          const inputs: HarEntryInput[] = [];
+          for (const item of batch.items) {
+            let parsed: unknown;
+            try {
+              parsed = parseJsonSlice(item.bytes, MAX_SLICE_BYTES);
+            } catch {
+              continue;
+            }
+            if (typeof parsed !== "object" || parsed === null) continue;
+            const entry = parsed as {
+              request?: { url?: unknown; postData?: { text?: unknown } };
+              response?: { content?: { text?: unknown; encoding?: unknown } };
+            };
+            inputs.push({
+              entryIndex: item.index,
+              url: typeof entry.request?.url === "string" ? entry.request.url : "",
+              bodyText:
+                typeof entry.response?.content?.text === "string"
+                  ? entry.response.content.text
+                  : null,
+              encoding:
+                typeof entry.response?.content?.encoding === "string"
+                  ? entry.response.content.encoding
+                  : null,
+              requestBodyText:
+                typeof entry.request?.postData?.text === "string"
+                  ? entry.request.postData.text
+                  : null,
+            });
+          }
+          const res = validateHarEntries(schema, inputs, filter);
+          const out: ValidationResult[] = Array.from({ length: batch.items.length }, () => ({
+            valid: true,
+            failures: [],
+            truncated: false,
+            checkedEntries: 0,
+          }));
+          out[0] = res;
+          return out;
+        },
+        {
+          concurrency: Math.max(1, doc.pool.size),
+          includeKeys: false,
+          collectResults: false,
+          signal: controller.signal,
+          onOrderedResult: (outcome) => {
+            if (!outcome.ok) return;
+            checkedEntries += outcome.value.checkedEntries;
+            for (const f of outcome.value.failures) {
+              if (failures.length >= MAX_SCHEMA_FAILURES) break;
+              failures.push(f);
+            }
+            if (failures.length >= MAX_SCHEMA_FAILURES) controller.abort();
+          },
+        },
+      );
+      return {
+        valid: failures.length === 0,
+        failures,
+        truncated: failures.length >= MAX_SCHEMA_FAILURES,
+        checkedEntries,
+      };
+    }
+
+    const size = this.docSize(doc.doc);
+    if (size > MAX_SLICE_BYTES) {
+      throw new SliceTooLargeError({ bytes: size, limit: MAX_SLICE_BYTES });
+    }
+    const slice = await this.readLogical(doc.doc, 0, size);
+    return validateJsonSlice(schema, slice);
+  }
+
+  private async codegen(
+    ref: NodeRef,
+    options: CodegenOptions,
+    shape?: Shape,
+  ): Promise<CodegenResult> {
+    const resolved =
+      shape ??
+      (await this.inferSchema(ref, {
+        maxEnum: options.maxEnum,
+        maxDepth: DEFAULT_MAX_INFER_DEPTH,
+      }));
+    return generateFromShape(resolved, options);
   }
 
   /** Runs `make` once per document and key; a failure is not remembered. */
@@ -4130,6 +5985,8 @@ export class EngineHost {
 
   /** Called after every change to a document's bytes: bumps the revision and tells the views. */
   private editResult(document: OpenDocument, node: NodeSummary, doc: Doc): EditResult {
+    document.harPrintsCache = null;
+    this.tableIndex.invalidateDocument(document.id);
     document.revision++;
     if (!document.replaying) this.emitEditState(document);
     return {

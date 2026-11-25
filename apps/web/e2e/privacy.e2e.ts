@@ -92,12 +92,30 @@ describe("requests stay on the page's own origin", () => {
     );
   });
 
+  it("blocks unlisted external hosts at the CSP before any request is sent", async () => {
+    await withPage(async (page, _context, network) => {
+      const violation = await page.evaluate(
+        () =>
+          new Promise<string>((resolve) => {
+            window.addEventListener(
+              "securitypolicyviolation",
+              (event) => resolve(event.blockedURI),
+              { once: true },
+            );
+            void fetch("https://elsewhere.invalid/ping").catch(() => null);
+          }),
+      );
+      expect(violation).toBe("https://elsewhere.invalid/ping");
+      expect(network.external()).toEqual([]);
+    });
+  });
+
   it("is checked: a page that reaches another host fails its test", async () => {
     const leaves = withPage(async (page, context) => {
-      // Refused before it leaves the machine; the page still asked for it.
-      await context.route("https://elsewhere.invalid/**", (route) => route.abort());
-      await page.evaluate(() => fetch("https://elsewhere.invalid/ping").catch(() => null));
+      // An Open VSX URL passes CSP's connect-src allowlist, so the network watcher catches it when externalHosts omits it.
+      await context.route("https://open-vsx.org/**", (route) => route.abort());
+      await page.evaluate(() => fetch("https://open-vsx.org/ping").catch(() => null));
     });
-    await expect(leaves).rejects.toThrow(/outside its own origin[^]*elsewhere\.invalid/);
+    await expect(leaves).rejects.toThrow(/outside its own origin[^]*open-vsx\.org/);
   });
 });

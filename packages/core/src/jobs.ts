@@ -13,6 +13,23 @@ import { indexBytes } from "./indexBuffer.ts";
 import { pieceSource, unpackPieces } from "./pieceSource.ts";
 import type { Job, JobResult } from "./protocol.ts";
 import { structure, summarize } from "./scan.ts";
+import { deepSearchChunk, quoteParityChunk } from "./deepSearch.ts";
+import { MAX_SLICE_BYTES } from "@quipu/contracts/engine";
+import { Hasher64 } from "./diff/hash.ts";
+import {
+  extractHarEntryPrintFromSlice,
+  extractHarPrintFromOversizedSource,
+  type HarEntryPrint,
+} from "./diff/har.ts";
+import { scanArrayWindowElements } from "./harWindow.ts";
+import {
+  extractHarTableRaw,
+  extractHarTableRawFromSource,
+  type HarTableRawRow,
+  scanHarTableWindowColumnar,
+  scanSingleOversizedHarRowColumnar,
+} from "./tableIndex.ts";
+import { emptyShape, inferJsonSlice, mergeShape } from "./schema/infer.ts";
 import { searchChunk } from "./search.ts";
 import type { ByteSource, SourceSpec } from "./source.ts";
 import { TapeBuilder, transferList } from "./tape.ts";
@@ -31,13 +48,19 @@ export const createJobRunner = (platform: Platform) => {
   const regionBytes = new Map<string, Uint8Array>();
   let regionBuffer = new ArrayBuffer(0);
   let stepBuffer = new ArrayBuffer(0);
+  let stepBufferAlt = new ArrayBuffer(0);
   const builder = new TapeBuilder(1 << 16);
   const readRegion = async (src: ByteSource, start: number, end: number) => {
     const r = await src.readInto(start, end, regionBuffer);
     regionBuffer = r.buffer;
     return r.bytes;
   };
-  const readStep = async (src: ByteSource, start: number, end: number) => {
+  const readStep = async (src: ByteSource, start: number, end: number, slot: 0 | 1 = 0) => {
+    if (slot === 1) {
+      const r = await src.readInto(start, end, stepBufferAlt);
+      stepBufferAlt = r.buffer;
+      return r.bytes;
+    }
     const r = await src.readInto(start, end, stepBuffer);
     stepBuffer = r.buffer;
     return r.bytes;
@@ -139,6 +162,32 @@ export const createJobRunner = (platform: Platform) => {
         );
         return { result, transfer: [result.hits.buffer as ArrayBuffer] };
       }
+      case "quoteParity": {
+        const src = source(job.sourceId);
+        const result = await quoteParityChunk(
+          (start, end) => readStep(src, start, end),
+          job.size,
+          job.start,
+          job.end,
+          job.decode,
+        );
+        return { result, transfer: [] };
+      }
+      case "deepSearch": {
+        const src = source(job.sourceId);
+        const result = await deepSearchChunk(
+          (start, end) => readStep(src, start, end),
+          job.size,
+          job.start,
+          job.end,
+          job.decode,
+          job.spec,
+          job.options,
+          job.resumeAt,
+          job.entryInString,
+        );
+        return { result, transfer: [result.hits.buffer as ArrayBuffer] };
+      }
       case "unescape": {
         const src = source(job.sourceId);
         const from = Math.max(job.contentStart, job.start - PIECE_LOOKBEHIND);
@@ -199,6 +248,189 @@ export const createJobRunner = (platform: Platform) => {
         const bytes = (await source(job.sourceId).read(job.start, job.end)).slice();
         return { result: bytes, transfer: [bytes.buffer as ArrayBuffer] };
       }
+      case "harTableWindow": {
+        const src = source(job.sourceId);
+        const bufHolder = { buffer: stepBuffer };
+        const cols =
+          job.expectedCount === 1 && job.end - job.start > MAX_SLICE_BYTES
+            ? await scanSingleOversizedHarRowColumnar(src, job.start, job.end)
+            : await scanHarTableWindowColumnar(
+                src,
+                job.start,
+                job.end,
+                job.stepBytes,
+                readStep,
+                bufHolder,
+              );
+        stepBuffer = bufHolder.buffer;
+        const ownedNums =
+          cols.nums.byteOffset === 0 && cols.nums.byteLength === cols.nums.buffer.byteLength
+            ? cols.nums
+            : cols.nums.slice();
+        return {
+          result: {
+            baseIndex: job.baseIndex,
+            count: cols.count,
+            nums: ownedNums,
+            methods: cols.methods,
+            urls: cols.urls,
+            mimeTypes: cols.mimeTypes,
+            startedDateTimes: cols.startedDateTimes,
+          },
+          transfer: ownedNums.buffer.byteLength > 0 ? [ownedNums.buffer as ArrayBuffer] : [],
+        };
+      }
+      case "harTableSlices": {
+        const src = source(job.sourceId);
+        const rows = await runCoalescedSlices<HarTableRawRow | null>(
+          src,
+          job.items,
+          readStep,
+          (item, bytes) =>
+            bytes === null
+              ? extractHarTableRawFromSource(src, item.start, item.end)
+              : extractHarTableRaw(bytes),
+        );
+        return {
+          result: { baseIndex: job.items[0]?.index ?? 0, rows },
+          transfer: [],
+        };
+      }
+      case "harPrintWindow": {
+        const src = source(job.sourceId);
+        const oversized: Array<{
+          readonly entryIndex: number;
+          readonly start: number;
+          readonly end: number;
+        }> = [];
+        const scanned = await scanArrayWindowElements<HarEntryPrint | null>(
+          src,
+          job.start,
+          job.end,
+          job.baseIndex,
+          job.stepBytes,
+          readStep,
+          async (index, elemStart, elemEnd, bytes) => {
+            if (bytes !== null) return extractHarEntryPrintFromSlice(bytes, index);
+            const streamed = await extractHarPrintFromOversizedSource(
+              src,
+              elemStart,
+              elemEnd,
+              index,
+            );
+            if (streamed !== null) return streamed;
+            oversized.push({ entryIndex: index, start: elemStart, end: elemEnd });
+            return null;
+          },
+        );
+        return {
+          result: { baseIndex: job.baseIndex, prints: scanned.items, oversized },
+          transfer: [],
+        };
+      }
+      case "harPrintSlices": {
+        const src = source(job.sourceId);
+        const oversized: Array<{
+          readonly entryIndex: number;
+          readonly start: number;
+          readonly end: number;
+        }> = [];
+        const prints = await runCoalescedSlices<HarEntryPrint | null>(
+          src,
+          job.items,
+          readStep,
+          async (item, bytes) => {
+            if (bytes !== null) return extractHarEntryPrintFromSlice(bytes, item.index);
+            const streamed = await extractHarPrintFromOversizedSource(
+              src,
+              item.start,
+              item.end,
+              item.index,
+            );
+            if (streamed !== null) return streamed;
+            oversized.push({ entryIndex: item.index, start: item.start, end: item.end });
+            return null;
+          },
+        );
+        return {
+          result: { baseIndex: job.items[0]?.index ?? 0, prints, oversized },
+          transfer: [],
+        };
+      }
+      case "hashSourceRange": {
+        const src = source(job.sourceId);
+        const hasher = new Hasher64();
+        const step = Math.max(64 * 1024, Math.min(job.stepBytes, MAX_SLICE_BYTES));
+        for (let at = job.start; at < job.end; at += step) {
+          const chunk = await readStep(src, at, Math.min(job.end, at + step));
+          hasher.writeBytes(chunk);
+        }
+        const h = hasher.finishMixed();
+        return {
+          result: { hash: job.end > job.start && h === 0n ? 1n : h },
+          transfer: [],
+        };
+      }
+      case "inferBatch": {
+        const bytes = new Uint8Array(job.buffer);
+        let acc = emptyShape();
+        for (const item of job.items) {
+          acc = mergeShape(
+            acc,
+            inferJsonSlice(bytes.subarray(item.start, item.end), job.options),
+            job.options,
+          );
+        }
+        return { result: acc, transfer: [] };
+      }
     }
   };
 };
+
+const COALESCED_READ_LIMIT = 4 * 1024 * 1024;
+
+async function runCoalescedSlices<T>(
+  src: ByteSource,
+  items: ReadonlyArray<{ readonly index: number; readonly start: number; readonly end: number }>,
+  readStep: (src: ByteSource, from: number, to: number) => Promise<Uint8Array>,
+  mapItem: (
+    item: { readonly index: number; readonly start: number; readonly end: number },
+    bytes: Uint8Array | null,
+  ) => T | Promise<T>,
+): Promise<T[]> {
+  const out: T[] = Array.from({ length: items.length });
+  let i = 0;
+  while (i < items.length) {
+    const first = items[i]!;
+    const firstLen = first.end - first.start;
+    if (firstLen <= 0 || firstLen > MAX_SLICE_BYTES) {
+      out[i] = await mapItem(first, null);
+      i++;
+      continue;
+    }
+    const batchStart = first.start;
+    let batchEnd = first.end;
+    let endIdx = i + 1;
+    while (endIdx < items.length) {
+      const next = items[endIdx]!;
+      const nextLen = next.end - next.start;
+      if (
+        nextLen <= 0 ||
+        nextLen > MAX_SLICE_BYTES ||
+        next.start < batchStart ||
+        next.end - batchStart > COALESCED_READ_LIMIT
+      ) {
+        break;
+      }
+      if (next.end > batchEnd) batchEnd = next.end;
+      endIdx++;
+    }
+    const buf = await readStep(src, batchStart, batchEnd);
+    for (let j = i; j < endIdx; j++) {
+      const item = items[j]!;
+      out[j] = await mapItem(item, buf.subarray(item.start - batchStart, item.end - batchStart));
+    }
+    i = endIdx;
+  }
+  return out;
+}

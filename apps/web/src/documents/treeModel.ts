@@ -1,3 +1,5 @@
+import { computeAncestorClosure } from "./hitFilter.ts";
+
 import type {
   Decoded,
   DecoderKind,
@@ -170,6 +172,7 @@ export class TreeModel {
   private cache: { version: number; rows: ReadonlyArray<TreeRow> } | null = null;
   private viewCache: { version: number; rows: ReadonlyArray<ViewRow> } | null = null;
   private failure: string | null = null;
+  private matchFilter: ReadonlySet<string> | null = null;
   version = 0;
 
   constructor(source: TreeSource, root: NodeSummary) {
@@ -333,8 +336,32 @@ export class TreeModel {
         });
       }
     }
-    this.cache = { version: this.version, rows };
-    return rows;
+    if (this.matchFilter === null) {
+      this.cache = { version: this.version, rows };
+      return rows;
+    }
+    const kept = computeAncestorClosure(this.matchFilter, (id) => this.parents.get(id));
+    const keptRows = rows.filter((row) => kept.has(row.id));
+    const totals = new Map<string | null, number>();
+    for (const row of keptRows) totals.set(row.parentId, (totals.get(row.parentId) ?? 0) + 1);
+    const seen = new Map<string | null, number>();
+    const filtered: TreeRow[] = keptRows.map((row) => {
+      const pos = (seen.get(row.parentId) ?? 0) + 1;
+      seen.set(row.parentId, pos);
+      return { ...row, position: pos, setSize: totals.get(row.parentId) ?? 1 };
+    });
+    this.cache = { version: this.version, rows: filtered };
+    return filtered;
+  }
+
+  /** Filters the visible tree to `matchedIds` plus their ancestors, or `null` to restore all rows. */
+  setMatchFilter(matchedIds: ReadonlySet<string> | null): void {
+    this.matchFilter = matchedIds;
+    this.changed();
+  }
+
+  getMatchFilter(): ReadonlySet<string> | null {
+    return this.matchFilter;
   }
 
   /**

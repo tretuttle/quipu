@@ -12,13 +12,33 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
-    "./settings": {
-      "types": "./src/settings.ts",
-      "import": "./src/settings.ts"
+    "./diff": {
+      "types": "./src/diff.ts",
+      "import": "./src/diff.ts"
     },
     "./engine": {
       "types": "./src/engine.ts",
       "import": "./src/engine.ts"
+    },
+    "./elementMap": {
+      "types": "./src/elementMap.ts",
+      "import": "./src/elementMap.ts"
+    },
+    "./deepSearch": {
+      "types": "./src/deepSearch.ts",
+      "import": "./src/deepSearch.ts"
+    },
+    "./table": {
+      "types": "./src/table.ts",
+      "import": "./src/table.ts"
+    },
+    "./settings": {
+      "types": "./src/settings.ts",
+      "import": "./src/settings.ts"
+    },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "import": "./src/schema.ts"
     }
   },
   "scripts": {

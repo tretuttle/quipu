@@ -46,6 +46,7 @@ function RightPanelToggleButton() {
           <Button
             aria-label={commandTitle("rightPanel.toggle")}
             aria-pressed={isOpen}
+            className="@max-[48rem]/workspace-header:size-7"
             data-right-panel-toggle=""
             onClick={toggle}
             size="icon-sm"
@@ -123,7 +124,10 @@ export function WorkspaceHeader({
   readonly documentActions?: ReactNode;
 }) {
   return (
-    <WorkspacePageHeader electron={isElectron} className="@container/workspace-header">
+    <WorkspacePageHeader
+      electron={isElectron}
+      className="@container/workspace-header @max-[48rem]/workspace-header:gap-1.5 @max-[48rem]/workspace-header:px-2"
+    >
       <WorkspaceBreadcrumb ariaLabel="Workspace breadcrumb" className="flex-1">
         {board !== null ? (
           <>
@@ -153,7 +157,7 @@ export function WorkspaceHeader({
           </>
         )}
       </WorkspaceBreadcrumb>
-      <div className="ms-auto flex shrink-0 items-center gap-2">
+      <div className="ms-auto flex shrink-0 items-center gap-2 @max-[48rem]/workspace-header:gap-1">
         {documentActions}
         {document !== null ? (
           <DocumentViewToggle

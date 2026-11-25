@@ -425,7 +425,7 @@ describe("the syntax table paints what shiki paints", () => {
       }
     }
 
-    expect(ALL_PALETTES).toHaveLength(14 + 4);
+    expect(ALL_PALETTES).toHaveLength((1 + BUILT_IN_THEMES.length) * 2 + 4);
     expect(compared).toBe(expected);
   });
 });

@@ -453,4 +453,31 @@ describe("TreeModel", () => {
       .map((row) => row.value);
     expect(rows).toEqual(["↑ send · text · 12 B · frame 0", "↓ receive · text · 13 B · frame 1"]);
   });
+
+  it("filters rows to exact hits plus ancestors and restores full tree when toggled off", async () => {
+    const { source, root } = fakeEngine({
+      alpha: { matchKey: "needle", sibling: "noise" },
+      beta: { deep: "other" },
+    });
+    const model = new TreeModel(source, root);
+    await model.setExpanded(model.rootId, true);
+    await show(model);
+    const alpha = model.view().find((row) => row.name === "alpha")!;
+    const beta = model.view().find((row) => row.name === "beta")!;
+    await model.setExpanded(alpha.id, true);
+    await model.setExpanded(beta.id, true);
+    await show(model);
+
+    const fullRows = model.view();
+    expect(fullRows.length).toBe(6); // root, alpha, matchKey, sibling, beta, deep
+
+    const matchRow = fullRows.find((row) => row.name === "matchKey")!;
+    model.setMatchFilter(new Set([matchRow.id]));
+    const filtered = model.view();
+    expect(filtered.map((row) => row.name)).toEqual(["root", "alpha", "matchKey"]);
+    expect(filtered.length).toBe(3); // 1 hit + 2 ancestors
+
+    model.setMatchFilter(null);
+    expect(model.view().length).toBe(6);
+  });
 });

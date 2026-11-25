@@ -57,7 +57,7 @@ describe("colors a theme cannot change", () => {
           .locator("[data-theme-library-card]")
           .getByRole("button", { name: /^Use .* theme/ })
           .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label")!));
-        expect(themes).toHaveLength(7);
+        expect(themes).toHaveLength(8);
         const failures: string[] = [];
         for (const mode of ["light", "dark"] as const) {
           await page.getByRole("button", { name: `Use ${mode} mode` }).click();

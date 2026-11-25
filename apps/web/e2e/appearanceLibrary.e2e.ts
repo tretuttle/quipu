@@ -49,7 +49,16 @@ describe("built-in palettes", () => {
         .locator("[data-theme-library-card]")
         .getByRole("button", { name: /^Use .* theme/ })
         .allTextContents();
-      expect(titles).toEqual(["Quipu", "Graphite", "Orchid", "Grove", "Ocean", "Ember", "Iris"]);
+      expect(titles).toEqual([
+        "Quipu",
+        "Graphite",
+        "Orchid",
+        "Grove",
+        "Ocean",
+        "Ember",
+        "Iris",
+        "High Contrast",
+      ]);
       expect(await page.locator("body").innerText()).not.toMatch(/\bT3\b/);
     }, APPEARANCE);
   });

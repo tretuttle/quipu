@@ -1,80 +1,70 @@
 import * as Schema from "effect/Schema";
 
 import { NonNegativeInt, PositiveInt } from "./baseSchemas.ts";
+import {
+  DeepSearchAnnotationsResult,
+  DeepSearchQuery,
+  DeepSearchSummary,
+  TraceResult,
+  TraceValueRequest,
+} from "./deepSearch.ts";
+import {
+  DiffCancelledError,
+  DiffTooLargeError,
+  HarDiffSummary,
+  StructuralDiffResult,
+} from "./diff.ts";
+import { JqElementRequest, JqElementResult, JqSuggestedPath } from "./elementMap.ts";
+import {
+  ByteOffset,
+  ByteRange,
+  CHILDREN_PAGE_LIMIT,
+  ChildrenCount,
+  DOCUMENT_FORMAT_LABELS,
+  DocumentFormat,
+  DocumentId,
+  DocumentName,
+  EDITABLE_FORMATS,
+  ErrorDetail,
+  JQ_OUTPUT_LIMIT_BYTES,
+  KeyText,
+  MAX_ERROR_DETAIL_LENGTH,
+  MAX_KEY_BYTES,
+  MAX_NAME_LENGTH,
+  MAX_QUERY_CHARS,
+  MAX_SLICE_BYTES,
+  MAX_SORT_CHILDREN,
+  NodeKind,
+  NodeRef,
+  QueryText,
+  STRUCTURED_FORMATS,
+  SearchMode,
+  SearchStatus,
+  SliceBytes,
+  SliceBytesArray,
+  SliceText,
+  TapeId,
+  TokenIndex,
+} from "./enginePrimitives.ts";
+import {
+  CodegenOptions,
+  CodegenResult,
+  HarValidationFilter,
+  InferOptions,
+  SchemaContractError,
+  Shape,
+  ValidationResult,
+} from "./schema.ts";
+import {
+  TableQueryCloseRequest,
+  TableQueryResult,
+  TableQuerySpec,
+  TableRowsPage,
+  TableRowsPageRequest,
+  TableTargetsResult,
+} from "./table.ts";
 
-/**
- * The engine RPC: what the UI thread may ask the document engine, and what comes
- * back. The engine runs in workers; every request crosses `postMessage`, so each
- * side decodes with these schemas. Offsets are UTF-8 byte
- * offsets into the original file, as JS numbers: exact to 2^53, which
- * no file reaches. Design and traps: docs/internals/document-engine.md.
- */
-
-export const DocumentId = PositiveInt;
-export type DocumentId = typeof DocumentId.Type;
-
-/** 0 is the document's own tape; child tapes hold on-demand buckets and nested documents. */
-export const TapeId = NonNegativeInt;
-export type TapeId = typeof TapeId.Type;
-
-export const TokenIndex = NonNegativeInt;
-export type TokenIndex = typeof TokenIndex.Type;
-
-export const ByteOffset = NonNegativeInt;
-export type ByteOffset = typeof ByteOffset.Type;
-
-/** `[start, end)` in bytes of the tape's source; `end` is never before `start`. */
-export const ByteRange = Schema.Struct({ start: ByteOffset, end: ByteOffset }).check(
-  Schema.makeFilter((range: { readonly start: number; readonly end: number }) =>
-    range.end >= range.start
-      ? true
-      : `a byte range whose end (${range.end}) is before its start (${range.start})`,
-  ),
-);
-export type ByteRange = typeof ByteRange.Type;
-
-/**
- * Every collection and string the engine returns, and every count the UI may
- * ask for, has a maximum in the schema, so an oversized reply or request fails
- * to decode instead of materializing a document on the UI thread.
- */
-
-/** The largest value the engine decodes into one JS value or string: a 64 MiB slice. */
-export const MAX_SLICE_BYTES = 64 * 1024 * 1024;
-export const SliceBytes = Schema.Int.check(
-  Schema.isBetween({ minimum: 1, maximum: MAX_SLICE_BYTES }),
-);
-/** Bytes that crossed the boundary as a slice: at most `MAX_SLICE_BYTES` of them. */
-export const SliceBytesArray = Schema.Uint8Array.check(Schema.isMaxLength(MAX_SLICE_BYTES));
-/** A decoded value's text: never more UTF-16 units than the slice it came from had bytes. */
-export const SliceText = Schema.String.check(Schema.isMaxLength(MAX_SLICE_BYTES));
-
-/** Member keys are decoded whole; the engine refuses a key past 1 MiB. */
-export const MAX_KEY_BYTES = 1024 * 1024;
-export const KeyText = Schema.String.check(Schema.isMaxLength(MAX_KEY_BYTES));
-
-/** A file name as the picker or the OS hands it over. */
-export const MAX_NAME_LENGTH = 4096;
-export const DocumentName = Schema.String.check(Schema.isMaxLength(MAX_NAME_LENGTH));
-
-/** The text of a worker failure, cut by the engine before it is sent. */
-export const MAX_ERROR_DETAIL_LENGTH = 4096;
-export const ErrorDetail = Schema.String.check(Schema.isMaxLength(MAX_ERROR_DETAIL_LENGTH));
-
-export const NodeRef = Schema.Struct({ documentId: DocumentId, tapeId: TapeId, token: TokenIndex });
-export type NodeRef = typeof NodeRef.Type;
-
-export const NodeKind = Schema.Literals([
-  "object",
-  "array",
-  "string",
-  "number",
-  "true",
-  "false",
-  "null",
-]);
-export type NodeKind = typeof NodeKind.Type;
-
+export * from "./enginePrimitives.ts";
 export const NodeSummary = Schema.Struct({
   ref: NodeRef,
   kind: NodeKind,
@@ -103,12 +93,6 @@ export const NodeSummary = Schema.Struct({
 });
 export type NodeSummary = typeof NodeSummary.Type;
 
-/** Children are served in buckets of at most this many nodes, so a big array arrives in chunks. */
-export const CHILDREN_PAGE_LIMIT = 1024;
-export const ChildrenCount = Schema.Int.check(
-  Schema.isBetween({ minimum: 1, maximum: CHILDREN_PAGE_LIMIT }),
-);
-
 export const ChildrenPage = Schema.Struct({
   from: NonNegativeInt,
   total: NonNegativeInt,
@@ -121,50 +105,6 @@ export const EngineCapabilities = Schema.Struct({
   workers: PositiveInt,
 });
 export type EngineCapabilities = typeof EngineCapabilities.Type;
-
-/**
- * What the engine decided a file is from its first bytes and its name. `text`
- * is everything it could not place (no file is refused); a
- * file of a known format can still open as text, and `DocumentInfo.note` says why.
- */
-export const DocumentFormat = Schema.Literals([
-  "json",
-  "jsonc",
-  "har",
-  "ndjson",
-  "yaml",
-  "toml",
-  "xml",
-  "csv",
-  "tsv",
-  "text",
-]);
-export type DocumentFormat = typeof DocumentFormat.Type;
-
-/** How the app names each format to the user. */
-export const DOCUMENT_FORMAT_LABELS: Readonly<Record<DocumentFormat, string>> = {
-  json: "JSON",
-  jsonc: "JSONC",
-  har: "HAR",
-  ndjson: "NDJSON",
-  yaml: "YAML",
-  toml: "TOML",
-  xml: "XML",
-  csv: "CSV",
-  tsv: "TSV",
-  text: "Text",
-};
-
-/**
- * The formats the engine indexes over the file's own bytes and so accepts
- * edits for; every other format with a structure opens read-only.
- */
-export const EDITABLE_FORMATS: ReadonlyArray<DocumentFormat> = ["json", "har"];
-
-/** The formats that open with a structure (a tree and a map); everything else is text. */
-export const STRUCTURED_FORMATS: ReadonlyArray<DocumentFormat> = DocumentFormat.literals.filter(
-  (format) => format !== "text",
-);
 
 /**
  * How the tree relates to the file. `native`: the index is over the file's own
@@ -389,13 +329,6 @@ export const HarEntriesPage = Schema.Struct({
 });
 export type HarEntriesPage = typeof HarEntriesPage.Type;
 
-export const SearchMode = Schema.Literals(["literal", "regex"]);
-export type SearchMode = typeof SearchMode.Type;
-
-/** The longest search text, path or jq program the engine accepts. */
-export const MAX_QUERY_CHARS = 4096;
-const QueryText = Schema.NonEmptyString.check(Schema.isMaxLength(MAX_QUERY_CHARS));
-
 /**
  * What to find. The text is matched against the
  * text the user sees, which is the file's text with the escapes inside JSON
@@ -410,9 +343,6 @@ export const SearchQuery = Schema.Struct({
 export type SearchQuery = typeof SearchQuery.Type;
 
 /** How a search ended: `partial` when too many chunks overran the regex time budget. */
-export const SearchStatus = Schema.Literals(["complete", "partial", "cancelled"]);
-export type SearchStatus = typeof SearchStatus.Type;
-
 /** The most hits one search keeps for next/previous and lighting; the count stays exact. */
 export const MAX_RETAINED_HITS = 262_144;
 
@@ -470,7 +400,6 @@ export const PathQueryResult = Schema.Struct({
 export type PathQueryResult = typeof PathQueryResult.Type;
 
 /** The most output the jq bar returns. */
-export const JQ_OUTPUT_LIMIT_BYTES = 4 * 1024 * 1024;
 const JQ_MIN_TIMEOUT_MS = 100;
 const JQ_MAX_TIMEOUT_MS = 60_000;
 export const JQ_DEFAULT_TIMEOUT_MS = 10_000;
@@ -761,9 +690,6 @@ export type DocumentPort = typeof DocumentPort.Type;
 export const DocumentSource = Schema.Union([Schema.instanceOf(Blob), DocumentPort]);
 export type DocumentSource = typeof DocumentSource.Type;
 
-/** Sort reads every child; a container past this many is refused. */
-export const MAX_SORT_CHILDREN = 1_000_000;
-
 export const EngineRequest = Schema.Union([
   Schema.TaggedStruct("capabilities", {}),
   /**
@@ -939,6 +865,46 @@ export const EngineRequest = Schema.Union([
     settings: ConvertSettings,
     sink: SaveSink,
   }),
+  Schema.TaggedStruct("jqSuggestPath", { ref: NodeRef }),
+  JqElementRequest,
+  Schema.TaggedStruct("deepSearch", { documentId: DocumentId, query: DeepSearchQuery }),
+  Schema.TaggedStruct("deepSearchAnnotations", {
+    documentId: DocumentId,
+    searchId: PositiveInt,
+    from: ByteOffset,
+    to: ByteOffset,
+  }),
+  Schema.TaggedStruct("traceValue", { documentId: DocumentId, request: TraceValueRequest }),
+  Schema.TaggedStruct("tableTargets", { documentId: DocumentId }),
+  Schema.TaggedStruct("tableQuery", TableQuerySpec.fields),
+  Schema.TaggedStruct("tableRows", TableRowsPageRequest.fields),
+  Schema.TaggedStruct("tableQueryClose", TableQueryCloseRequest.fields),
+  Schema.TaggedStruct("compareStructural", { aDocumentId: DocumentId, bDocumentId: DocumentId }),
+  Schema.TaggedStruct("compareHar", {
+    aDocumentId: DocumentId,
+    bDocumentId: DocumentId,
+    reference: Schema.Literals(["a", "b"]),
+  }),
+  Schema.TaggedStruct("compareHarEntryBody", {
+    aDocumentId: DocumentId,
+    aEntryIndex: Schema.NullOr(NonNegativeInt),
+    bDocumentId: DocumentId,
+    bEntryIndex: Schema.NullOr(NonNegativeInt),
+  }),
+  Schema.TaggedStruct("inferSchema", {
+    ref: NodeRef,
+    options: Schema.optionalKey(InferOptions),
+  }),
+  Schema.TaggedStruct("validateSchema", {
+    documentId: DocumentId,
+    schemaText: Schema.String,
+    filter: Schema.optionalKey(Schema.NullOr(HarValidationFilter)),
+  }),
+  Schema.TaggedStruct("codegen", {
+    ref: NodeRef,
+    options: CodegenOptions,
+    shape: Schema.optionalKey(Shape),
+  }),
 ]);
 export type EngineRequest = typeof EngineRequest.Type;
 export type EngineRequestTag = EngineRequest["_tag"];
@@ -991,6 +957,21 @@ export const EngineResult = {
   detach: Schema.Null,
   exportTargets: Schema.Array(ExportTarget).check(Schema.isMaxLength(CONVERT_FORMATS.length)),
   convert: SaveResult,
+  jqSuggestPath: Schema.NullOr(JqSuggestedPath),
+  jqElement: JqElementResult,
+  deepSearch: DeepSearchSummary,
+  deepSearchAnnotations: DeepSearchAnnotationsResult,
+  traceValue: TraceResult,
+  tableTargets: TableTargetsResult,
+  tableQuery: TableQueryResult,
+  tableRows: TableRowsPage,
+  tableQueryClose: Schema.Null,
+  compareStructural: StructuralDiffResult,
+  compareHar: HarDiffSummary,
+  compareHarEntryBody: StructuralDiffResult,
+  inferSchema: Shape,
+  validateSchema: ValidationResult,
+  codegen: CodegenResult,
 } as const satisfies Record<EngineRequestTag, Schema.Top>;
 export type EngineResult = {
   readonly [Tag in EngineRequestTag]: (typeof EngineResult)[Tag]["Type"];
@@ -1063,7 +1044,11 @@ export class InvalidPathError extends Schema.TaggedError<InvalidPathError>()("In
 
 export class JqSubtreeTooLargeError extends Schema.TaggedError<JqSubtreeTooLargeError>()(
   "JqSubtreeTooLargeError",
-  { bytes: NonNegativeInt, limit: PositiveInt },
+  {
+    bytes: NonNegativeInt,
+    limit: PositiveInt,
+    suggestedPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  },
 ) {
   override get message(): string {
     const mib = (n: number) => `${Math.round((n / (1024 * 1024)) * 10) / 10} MiB`;
@@ -1155,6 +1140,9 @@ export const EngineError = Schema.Union([
   EditRefusedError,
   NothingToUndoError,
   ConvertError,
+  DiffTooLargeError,
+  DiffCancelledError,
+  SchemaContractError,
 ]);
 export type EngineError = typeof EngineError.Type;
 

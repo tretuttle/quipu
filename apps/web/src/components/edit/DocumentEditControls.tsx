@@ -99,6 +99,7 @@ function HistoryButton({
         render={
           <Button
             aria-label={label}
+            className="@max-[48rem]/workspace-header:size-7"
             size="icon-sm"
             variant="ghost"
             disabled={reason !== null}
@@ -135,7 +136,7 @@ export function DocumentEditControls() {
       <HistoryButton direction="undo" depth={document.edit.undoDepth} blocked={blocked} />
       <HistoryButton direction="redo" depth={document.edit.redoDepth} blocked={blocked} />
       <Menu>
-        <MenuTrigger render={<Button size="sm" variant="ghost" aria-label="Transform" />}>
+        <MenuTrigger render={<Button size="header-sm" variant="ghost" aria-label="Transform" />}>
           <ArrowDownUpIcon />
           {/* A narrow header keeps the icon; the button's name stays. */}
           <span className={HEADER_ACTION_LABEL_CLASS}>Transform</span>

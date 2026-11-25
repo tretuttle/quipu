@@ -2,9 +2,10 @@
  * YAML onto the tape: the whole text is parsed with the `yaml` package and every
  * node's range is mapped to UTF-8 byte offsets in the original file. The tape is
  * the resolved document: an alias is expanded in place (its children keep the
- * ranges of the anchor's source), so a consumer sees what `yaml.parse` returns.
- * Keys keep their own byte range in `keyEnds`, parallel to the tape, because the
- * tape stores only a key's start.
+ * ranges of the anchor's source), and YAML 1.1 merge keys (`<<`) are expanded
+ * with the mapping's own keys winning over merged keys, so a consumer sees what
+ * `yaml.parse(..., { merge: true })` returns. Keys keep their own byte range in
+ * `keyEnds`, parallel to the tape, because the tape stores only a key's start.
  */
 import {
   isAlias,
@@ -41,11 +42,12 @@ export interface TextIndex {
 }
 
 type Range = readonly [number, number, number];
+type MapEntry = readonly [YamlNode | null | undefined, YamlNode | null | undefined];
 
 interface Frame {
   readonly token: number;
   /** Remaining child entries: [keyNode | undefined, valueNode]. */
-  readonly entries: Array<readonly [YamlNode | null | undefined, YamlNode | null | undefined]>;
+  readonly entries: Array<MapEntry>;
   next: number;
   last: number;
   count: number;
@@ -60,6 +62,76 @@ const kindOf = (value: unknown) => {
   return KIND_STRING;
 };
 
+const isMergeKey = (key: YamlNode | null | undefined): boolean => {
+  if (key === null || key === undefined || !isScalar(key)) return false;
+  if (typeof key.value === "symbol") return key.value.description === "<<";
+  return (
+    key.value === "<<" &&
+    key.type === "PLAIN" &&
+    (!key.tag || key.tag === "tag:yaml.org,2002:merge")
+  );
+};
+
+const resolveMergeSources = (
+  value: YamlNode | null | undefined,
+  doc: Document.Parsed,
+  ancestors: ReadonlySet<YamlNode>,
+): ReadonlyArray<ReturnType<typeof isMap> extends never ? never : YamlNode> | null => {
+  const resolveMap = (node: YamlNode | null | undefined) => {
+    const target = node && isAlias(node) ? node.resolve(doc) : node;
+    if (!target || !isMap(target) || ancestors.has(target as YamlNode)) return null;
+    return target as YamlNode;
+  };
+  const direct = resolveMap(value);
+  if (direct) return [direct];
+  if (value && isSeq(value)) {
+    const maps: YamlNode[] = [];
+    for (const item of value.items) {
+      const m = resolveMap(item as YamlNode);
+      if (!m) return null;
+      maps.push(m);
+    }
+    return maps;
+  }
+  return null;
+};
+
+const expandMapEntries = (
+  items: ReadonlyArray<{ readonly key: unknown; readonly value: unknown }>,
+  doc: Document.Parsed,
+  ancestors: ReadonlySet<YamlNode>,
+): MapEntry[] => {
+  const seen = new Set<unknown>();
+  for (const pair of items) {
+    const key = pair.key as YamlNode | null | undefined;
+    if (!isMergeKey(key) && key && isScalar(key)) seen.add(key.value);
+  }
+  const entries: MapEntry[] = [];
+  for (const pair of items) {
+    const key = pair.key as YamlNode | null | undefined;
+    const value = pair.value as YamlNode | null | undefined;
+    if (isMergeKey(key)) {
+      const sources = resolveMergeSources(value, doc, ancestors);
+      if (sources) {
+        for (const source of sources) {
+          if (!isMap(source)) continue;
+          for (const merged of source.items) {
+            const mk = merged.key as YamlNode | null | undefined;
+            if (mk && isScalar(mk)) {
+              if (seen.has(mk.value)) continue;
+              seen.add(mk.value);
+            }
+            entries.push([mk, merged.value as YamlNode]);
+          }
+        }
+        continue;
+      }
+    }
+    entries.push([key, value]);
+  }
+  return entries;
+};
+
 /** Indexes YAML bytes; throws FormatSyntaxError on a parse error and FormatTooLargeError past the limit. */
 export const indexYaml = (bytes: Uint8Array): TextIndex => {
   if (bytes.length > TEXT_FORMAT_LIMIT) {
@@ -71,7 +143,7 @@ export const indexYaml = (bytes: Uint8Array): TextIndex => {
   }
   const text = decodeLargeText(bytes);
   const map = new ByteOffsets(text, bytes.length);
-  const docs = parseAllDocuments(text, { prettyErrors: false }) as Document.Parsed[];
+  const docs = parseAllDocuments(text, { prettyErrors: false, merge: true }) as Document.Parsed[];
   for (const doc of docs) {
     const error = doc.errors[0];
     if (error) {
@@ -129,15 +201,14 @@ export const indexYaml = (bytes: Uint8Array): TextIndex => {
       const t = tape.push(KIND_OBJECT, start, parent, keyStart);
       setKeyEnd(t, keyEnd);
       tape.setEnd(t, map.at(r[1]));
+      const nextAncestors = new Set([...ancestors, target]);
       return {
         token: t,
-        entries: target.items.map(
-          (pair) => [pair.key as YamlNode, pair.value as YamlNode] as const,
-        ),
+        entries: expandMapEntries(target.items, currentDoc, nextAncestors),
         next: 0,
         last: -1,
         count: 0,
-        ancestors: new Set([...ancestors, target]),
+        ancestors: nextAncestors,
       };
     }
     if (target && isSeq(target)) {
@@ -192,10 +263,7 @@ export const indexYaml = (bytes: Uint8Array): TextIndex => {
         stack.pop();
         continue;
       }
-      const [keyNode, valueNode] = frame.entries[frame.next++] as readonly [
-        YamlNode | null | undefined,
-        YamlNode | null | undefined,
-      ];
+      const [keyNode, valueNode] = frame.entries[frame.next++] as MapEntry;
       let keyStart = NO_KEY;
       let keyEnd = 0;
       if (keyNode !== undefined) {

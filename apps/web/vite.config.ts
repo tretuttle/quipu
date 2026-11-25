@@ -35,6 +35,42 @@ export const crossOriginIsolationHeaders = {
   "Cross-Origin-Embedder-Policy": "require-corp",
 } as const;
 
+const baseConnectSources = [
+  "'self'",
+  "blob:",
+  "https://open-vsx.org",
+  "https://openvsx.eclipsecontent.org",
+];
+
+function buildWebCsp(allowDevWs: boolean): string {
+  const connectSources = allowDevWs ? [...baseConnectSources, "ws:", "wss:"] : baseConnectSources;
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+    `connect-src ${connectSources.join(" ")}`,
+    "img-src 'self' blob: data: https://open-vsx.org https://openvsx.eclipsecontent.org",
+    "media-src 'self' blob:",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self' data:",
+    "worker-src 'self' blob:",
+    "frame-src 'self' blob:",
+    "form-action 'self'",
+  ].join("; ");
+}
+
+export const WEB_CSP = buildWebCsp(false);
+export const WEB_DEV_CSP = buildWebCsp(true);
+
+const webSecurityHeaders = {
+  ...crossOriginIsolationHeaders,
+  "Content-Security-Policy": WEB_CSP,
+} as const;
+
+const webDevSecurityHeaders = {
+  ...crossOriginIsolationHeaders,
+  "Content-Security-Policy": WEB_DEV_CSP,
+} as const;
+
 const buildSourcemap: boolean | "hidden" =
   sourcemapEnv === "0" || sourcemapEnv === "false"
     ? false
@@ -89,6 +125,13 @@ export default defineConfig(() => {
         presets: [reactCompilerPreset()],
       }),
       tailwindPlugins(bundledDev),
+      {
+        name: "quipu-dev-csp",
+        apply: "serve",
+        transformIndexHtml(html: string) {
+          return html.replace(WEB_CSP, WEB_DEV_CSP);
+        },
+      },
     ],
     optimizeDeps: {
       // The engine client and its workers load these on first use; listing them
@@ -125,7 +168,7 @@ export default defineConfig(() => {
       host,
       port,
       strictPort: true,
-      headers: crossOriginIsolationHeaders,
+      headers: webDevSecurityHeaders,
       // Transform the whole module graph at server start instead of on the
       // first request. Without this, a cold worktree discovers and transforms
       // modules one import-level at a time while the browser waits.
@@ -145,7 +188,7 @@ export default defineConfig(() => {
         : {}),
     },
     preview: {
-      headers: crossOriginIsolationHeaders,
+      headers: webSecurityHeaders,
     },
     // @tailwindcss/vite only emits a CSS sourcemap when devSourcemap is on; without it
     // rolldown flags the transform as SOURCEMAP_BROKEN on every sourcemapped build.

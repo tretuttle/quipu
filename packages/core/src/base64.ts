@@ -25,6 +25,38 @@ const isHex = (byte: number) =>
 /** Upper bound on the bytes decoding `chars` base64 characters can write. */
 export const base64MaxDecoded = (chars: number) => Math.ceil(chars / 4) * 3 + 3;
 
+/**
+ * Decodes an ASCII base64 string (standard `+/` or URL `-_`, optional whitespace/`=`)
+ * directly into a `Uint8Array` without UTF-8 encoding via `TextEncoder`.
+ * Returns `null` if empty, non-ASCII, contains JSON backslash escapes, or contains invalid chars.
+ */
+export function decodeBase64Ascii(text: string): Uint8Array | null {
+  const n = text.length;
+  if (n === 0) return null;
+  const out = new Uint8Array(base64MaxDecoded(n));
+  let o = 0;
+  let acc = 0;
+  let bits = 0;
+  for (let i = 0; i < n; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0x80) return null;
+    const v = TABLE[code] as number;
+    if (v < 0) {
+      if (code === 0x0a || code === 0x0d || code === 0x20 || code === 0x09 || code === PAD) {
+        continue;
+      }
+      return null;
+    }
+    acc = ((acc << 6) | v) & 0xffffff;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[o++] = (acc >> bits) & 0xff;
+    }
+  }
+  return o === 0 ? null : out.subarray(0, o);
+}
+
 export class Base64Decoder {
   private acc = 0;
   private bits = 0;

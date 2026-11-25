@@ -23,12 +23,25 @@ export interface ReadInto {
   readonly buffer: ArrayBuffer;
 }
 
+export interface ByteStreamChunk {
+  readonly bytesRead: number;
+  readonly buffer: ArrayBuffer;
+}
+
+export interface ByteStreamReader {
+  /** Reads up to `maxLen` bytes into `buffer` starting at `offset` (`0` = EOF). */
+  nextInto(buffer: ArrayBuffer, offset: number, maxLen: number): Promise<ByteStreamChunk>;
+  close(): void;
+}
+
 export interface ByteSource {
   readonly size: number;
   /** Bytes [start, end). Allocates; may alias an internal buffer only for memory sources. */
   read(start: number, end: number): Promise<Uint8Array>;
   /** Bytes [start, end) into `buffer` (grown when too small). */
   readInto(start: number, end: number, buffer: ArrayBuffer): Promise<ReadInto>;
+  /** Optional continuous BYOB byte stream over `[start, end)` avoiding per-chunk slice overhead. */
+  readonly openStream?: (start: number, end: number) => ByteStreamReader;
   close(): void;
 }
 
@@ -108,10 +121,84 @@ export const blobSource = (blob: Blob): ByteSource => {
       return readInto(start, end, buffer);
     }
   };
+  const openStream = (start: number, end: number): ByteStreamReader => {
+    const clampedEnd = Math.min(blob.size, Math.max(start, end));
+    let reader: ReadableStreamBYOBReader | null = null;
+    let cursor = start;
+    let closed = false;
+    let streamByob = byob !== false;
+
+    const ensureReader = (): ReadableStreamBYOBReader | null => {
+      if (!streamByob || closed) return null;
+      if (reader !== null) return reader;
+      try {
+        reader = blob.slice(start, clampedEnd).stream().getReader({ mode: "byob" });
+        byob = true;
+        return reader;
+      } catch (error) {
+        if (byob === true && !(error instanceof TypeError)) throw error;
+        byob = false;
+        streamByob = false;
+        return null;
+      }
+    };
+
+    return {
+      nextInto: async (buffer, offset, maxLen) => {
+        if (closed || cursor >= clampedEnd || maxLen <= 0) {
+          return { bytesRead: 0, buffer };
+        }
+        const activeReader = ensureReader();
+        if (activeReader === null) {
+          const chunkEnd = Math.min(clampedEnd, cursor + maxLen);
+          const slice = await readBlobSlice(blob, cursor, chunkEnd);
+          const out = new Uint8Array(buffer, offset, slice.byteLength);
+          out.set(slice);
+          cursor += slice.byteLength;
+          return { bytesRead: slice.byteLength, buffer };
+        }
+        try {
+          const { done, value } = await activeReader.read(new Uint8Array(buffer, offset, maxLen));
+          const nextBuf = value ? (value.buffer as ArrayBuffer) : buffer;
+          if (done || !value) {
+            cursor = clampedEnd;
+            return { bytesRead: 0, buffer: nextBuf };
+          }
+          cursor += value.byteLength;
+          return { bytesRead: value.byteLength, buffer: nextBuf };
+        } catch (error) {
+          if (byob === true && !(error instanceof TypeError)) throw error;
+          byob = false;
+          streamByob = false;
+          reader = null;
+          const chunkEnd = Math.min(clampedEnd, cursor + maxLen);
+          const slice = await readBlobSlice(blob, cursor, chunkEnd);
+          const out = new Uint8Array(buffer, offset, slice.byteLength);
+          out.set(slice);
+          cursor += slice.byteLength;
+          return { bytesRead: slice.byteLength, buffer };
+        }
+      },
+      close: () => {
+        if (closed) return;
+        closed = true;
+        if (reader !== null) {
+          const r = reader;
+          reader = null;
+          void r.cancel().catch(() => {});
+          try {
+            r.releaseLock();
+          } catch {}
+        }
+      },
+    };
+  };
+
   return {
     size: blob.size,
     read: (start, end) => readBlobSlice(blob, start, end),
     readInto,
+    openStream,
     close: () => {},
   };
 };

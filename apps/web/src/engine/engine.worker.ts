@@ -22,9 +22,9 @@ import type { FormatJob, FormatJobResult } from "@quipu/formats/jobs";
 import { FormatPool, type WorkerLike } from "@quipu/formats/pool";
 import * as Schema from "effect/Schema";
 
-import type { JqRunReply, JqRunRequest } from "./jq.worker.ts";
+import { createJqPool } from "./jqPool.ts";
 
-const MAX_SCAN_WORKERS = 16;
+const MAX_SCAN_WORKERS = 24;
 
 const decodeRequest = Schema.decodeUnknownSync(EngineRequestEnvelope);
 const encodeError = Schema.encodeSync(EngineError);
@@ -105,38 +105,13 @@ const scratch = async (): Promise<ScratchFile> => {
   }
 };
 
-/** Runs one jq program in its own worker and stops the worker at the time budget. */
+const jqPool = createJqPool();
 const runJq = (
   input: Uint8Array,
   program: string,
   timeoutMs: number,
   outputLimit: number,
-): Promise<JqOutcome> =>
-  new Promise((resolve) => {
-    const worker = new Worker(new URL("./jq.worker.ts", import.meta.url), { type: "module" });
-    const finish = (outcome: JqOutcome) => {
-      clearTimeout(timer);
-      worker.terminate();
-      resolve(outcome);
-    };
-    const timer = setTimeout(
-      () =>
-        finish({
-          status: "timeout",
-          output: "",
-          truncated: false,
-          message: `jq did not finish in ${timeoutMs} ms and was stopped.`,
-        }),
-      timeoutMs,
-    );
-    worker.addEventListener("message", (event: MessageEvent<JqRunReply>) => finish(event.data));
-    worker.addEventListener("error", (event) =>
-      finish({ status: "error", output: "", truncated: false, message: event.message }),
-    );
-    const buffer = input.buffer as ArrayBuffer;
-    const request: JqRunRequest = { input: buffer, program, outputLimit };
-    worker.postMessage(request, [buffer]);
-  });
+): Promise<JqOutcome> => jqPool.run(input, program, timeoutMs, outputLimit);
 
 // Journals go to OPFS on the web (sync access handles exist here, in a dedicated worker). The
 // desktop renderer hands over a MessagePort to its state directory instead, before the first open.
@@ -153,6 +128,7 @@ const platform: HostPlatform = {
       },
     }),
   runJq,
+  runJqBatch: true,
   journalStore:
     typeof navigator.storage?.getDirectory === "function" ? opfsJournalStore() : undefined,
   formats: createEngineFormats({

@@ -22,6 +22,7 @@ import {
   type ThemeHalves,
   EMBER_THEME,
   GROVE_THEME,
+  HIGH_CONTRAST_THEME,
   IRIS_THEME,
   OCEAN_THEME,
   ORCHID_THEME,
@@ -62,6 +63,7 @@ const TRAILING_BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [
   OCEAN_THEME,
   EMBER_THEME,
   IRIS_THEME,
+  HIGH_CONTRAST_THEME,
 ];
 
 function downloadThemeFile(filename: string, contents: string): void {

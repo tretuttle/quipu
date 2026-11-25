@@ -9,13 +9,16 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
 
-export const RIGHT_PANEL_TABS = ["inspector", "source"] as const;
+export const RIGHT_PANEL_TABS = ["inspector", "source", "trace", "schema", "problems"] as const;
 export type RightPanelTab = (typeof RIGHT_PANEL_TABS)[number];
 const DEFAULT_RIGHT_PANEL_TAB: RightPanelTab = "inspector";
 
 export const RIGHT_PANEL_TAB_LABELS: Readonly<Record<RightPanelTab, string>> = {
   inspector: "Inspector",
   source: "Source",
+  trace: "Trace",
+  schema: "Schema",
+  problems: "Problems",
 };
 
 const RIGHT_PANEL_STORAGE_KEY = "quipu:right-panel-state:v1";

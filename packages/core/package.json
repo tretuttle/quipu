@@ -36,6 +36,10 @@
       "types": "./src/detectString.ts",
       "import": "./src/detectString.ts"
     },
+    "./diff": {
+      "types": "./src/diff/index.ts",
+      "import": "./src/diff/index.ts"
+    },
     "./document": {
       "types": "./src/document.ts",
       "import": "./src/document.ts"
@@ -179,6 +183,34 @@
     "./testing/walk": {
       "types": "./src/testing/walk.ts",
       "import": "./src/testing/walk.ts"
+    },
+    "./elementMap": {
+      "types": "./src/elementMap.ts",
+      "import": "./src/elementMap.ts"
+    },
+    "./pathFilter": {
+      "types": "./src/pathFilter.ts",
+      "import": "./src/pathFilter.ts"
+    },
+    "./deepSearch": {
+      "types": "./src/deepSearch.ts",
+      "import": "./src/deepSearch.ts"
+    },
+    "./trace": {
+      "types": "./src/trace.ts",
+      "import": "./src/trace.ts"
+    },
+    "./tableIndex": {
+      "types": "./src/tableIndex.ts",
+      "import": "./src/tableIndex.ts"
+    },
+    "./schema": {
+      "types": "./src/schema/index.ts",
+      "import": "./src/schema/index.ts"
+    },
+    "./codegen": {
+      "types": "./src/codegen/index.ts",
+      "import": "./src/codegen/index.ts"
     }
   },
   "scripts": {

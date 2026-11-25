@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self' blob: https://open-vsx.org https://openvsx.eclipsecontent.org; img-src 'self' blob: data: https://open-vsx.org https://openvsx.eclipsecontent.org; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; frame-src 'self' blob:; form-action 'self'"
+    />
+    <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
@@ -140,6 +144,20 @@
               chrome: "oklch(0.205094 0.009996 52.903)",
             },
           },
+          "high-contrast": {
+            light: {
+              background: "oklch(1 0 0)",
+              foreground: "oklch(0 0 0)",
+              accent: "oklch(0.356145 0.182423 263.157)",
+              chrome: "oklch(1 0 0)",
+            },
+            dark: {
+              background: "oklch(0 0 0)",
+              foreground: "oklch(1 0 0)",
+              accent: "oklch(0.827587 0.101277 230.318)",
+              chrome: "oklch(0 0 0)",
+            },
+          },
         };
         // Keep the built-in mode list in sync with the runtime so the selected
         // palette is visible before React has mounted.
@@ -159,6 +177,7 @@
           "ocean",
           "ember",
           "iris",
+          "high-contrast",
         ];
         // Update every theme-color meta so any element another layer added
         // carries the resolved color too.

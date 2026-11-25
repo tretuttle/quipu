@@ -43,23 +43,30 @@ function panelText(): string {
 }
 
 describe("right panel", () => {
-  it("lists the Inspector and Source tabs, with the Inspector selected and its empty state showing", async () => {
+  it("lists all right-panel tabs, with the Inspector selected and its empty state showing", async () => {
     await act(() => root.render(<RightPanel />));
 
     const names = [...container.querySelectorAll('[role="tab"]')].map((button) =>
       (button.textContent ?? "").trim(),
     );
-    expect(names).toEqual(["Inspector", "Source"]);
+    expect(names).toEqual(["Inspector", "Source", "Trace", "Schema", "Problems"]);
     expect(selectedTabs()).toEqual(["Inspector"]);
     expect(panelText()).toContain("Nothing to inspect");
   });
 
-  it("shows the Source tab's empty state when it is selected", async () => {
+  it("shows each tab's empty state when selected with no open document", async () => {
     await act(() => root.render(<RightPanel />));
 
-    await act(() => tab("Source").click());
-    expect(selectedTabs()).toEqual(["Source"]);
-    expect(panelText()).toContain("No source to show");
+    for (const [label, expected] of [
+      ["Source", "No source to show"],
+      ["Trace", "No trace results"],
+      ["Schema", "No schema inferred"],
+      ["Problems", "No validation run"],
+    ] as const) {
+      await act(() => tab(label).click());
+      expect(selectedTabs()).toEqual([label]);
+      expect(panelText()).toContain(expected);
+    }
   });
 
   it("moves between tabs with the arrow keys, wrapping at both ends", async () => {
@@ -73,11 +80,11 @@ describe("right panel", () => {
 
     tab("Inspector").focus();
     await press("ArrowLeft");
-    expect(selectedTabs()).toEqual(["Source"]);
+    expect(selectedTabs()).toEqual(["Problems"]);
     await press("ArrowRight");
     expect(selectedTabs()).toEqual(["Inspector"]);
     await press("End");
-    expect(selectedTabs()).toEqual(["Source"]);
+    expect(selectedTabs()).toEqual(["Problems"]);
     await press("Home");
     expect(selectedTabs()).toEqual(["Inspector"]);
   });

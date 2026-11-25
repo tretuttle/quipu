@@ -21,14 +21,16 @@ describe("migratePersistedRightPanelState", () => {
   );
 
   it("reopens a panel saved on a tab that no longer exists on the Inspector", () => {
-    expect(migratePersistedRightPanelState({ isOpen: true, activeTab: "schema" })).toEqual({
+    expect(migratePersistedRightPanelState({ isOpen: true, activeTab: "files" })).toEqual({
       isOpen: true,
       activeTab: "inspector",
     });
   });
 
-  it("recognizes exactly the Inspector and Source tabs", () => {
-    expect(["inspector", "source"].every(isRightPanelTab)).toBe(true);
-    for (const tab of ["diff", "schema", "files"]) expect(isRightPanelTab(tab)).toBe(false);
+  it("recognizes the Inspector, Source, Trace, Schema, and Problems tabs", () => {
+    expect(["inspector", "source", "trace", "schema", "problems"].every(isRightPanelTab)).toBe(
+      true,
+    );
+    for (const tab of ["diff", "files", "missing"]) expect(isRightPanelTab(tab)).toBe(false);
   });
 });

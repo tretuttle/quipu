@@ -28,10 +28,11 @@ export function runShellCommand(command: KeybindingCommand): boolean {
   return true;
 }
 
-export const RIGHT_PANEL_TAB_COMMANDS = {
-  inspector: "rightPanel.inspector",
-  source: "rightPanel.source",
-} as const satisfies Record<RightPanelTab, KeybindingCommand>;
+export const RIGHT_PANEL_TAB_COMMANDS: Readonly<Partial<Record<RightPanelTab, KeybindingCommand>>> =
+  {
+    inspector: "rightPanel.inspector",
+    source: "rightPanel.source",
+  };
 
 export function rightPanelTabForCommand(command: KeybindingCommand): RightPanelTab | null {
   return RIGHT_PANEL_TABS.find((tab) => RIGHT_PANEL_TAB_COMMANDS[tab] === command) ?? null;

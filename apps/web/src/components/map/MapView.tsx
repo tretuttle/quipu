@@ -37,7 +37,9 @@ import {
 } from "react";
 
 import { getInspectSource, getMapSource, type OpenDocument } from "../../documents/documentSession";
+import { useMatchFilterStore } from "../../documents/hitFilter";
 import { createWorkerLayoutRunner } from "../../documents/mapLayoutRunner";
+import { useTraceStore } from "../../documents/TracePanel";
 import {
   MAP_CHAR_WIDTH,
   MAP_HEADER_HEIGHT,
@@ -59,11 +61,13 @@ import { DrawingSurface, type SurfaceContext } from "../board/DrawingSurface";
 import { measureBoardText } from "../board/boardPaint";
 import { MapMinimap } from "./MapMinimap";
 import { MAP_CHEVRON_WIDTH, MAP_DIM_OPACITY, MapEdge, MapNodeView, mapRowTextX } from "./MapNodes";
+import { downloadMapBlob, exportMapPng, exportMapSvg } from "./MapExport";
 import { MapRowEditor, useMapRowEditing } from "./MapRowEditor";
 import { readThemeColor } from "./mapPaint";
 import { registerMapController } from "./mapRegistry";
 import { useMapStatus } from "./mapStatus";
 import { useMapSearchMarks, type MapSearchMarks } from "./mapSearch";
+import { TraceArcs } from "./TraceArcs";
 
 /** Screen pixels beyond the viewport that stay mounted (the surface uses the same). */
 const MOUNT_MARGIN_PX = 400;
@@ -607,9 +611,28 @@ export function MapView({
     moveFocusTo(selectedLocation.nodeId, selection.origin !== "search", selectedLocation.rowIndex);
   }, [selection, selectedLocation, selectedLaidOut, moveFocusTo, model]);
 
+  // Match filter: hide non-matching branches when toggled on.
+  const matchFilterEnabled = useMatchFilterStore((state) => state.enabled);
+  const matchedIds = useMatchFilterStore((state) => state.matchedIds);
+  useEffect(() => {
+    model.setMatchFilter(matchFilterEnabled ? matchedIds : null);
+  }, [model, matchFilterEnabled, matchedIds]);
+
+  // Transient trace arcs.
+  const traceResult = useTraceStore((state) => state.result);
+  const traceOriginRange = useTraceStore((state) => state.originRange);
+
   // Search: nodes and rows holding a hit are lit, the rest dimmed.
   const hitSet = useHitSet(document);
   const searchMarks = useMapSearchMarks(hitSet, snapshot, tree);
+  const searchMarksRef = useRef(searchMarks);
+  const cameraRef = useRef(camera);
+  const viewportRef = useRef(viewport);
+  useLayoutEffect(() => {
+    searchMarksRef.current = searchMarks;
+    cameraRef.current = camera;
+    viewportRef.current = viewport;
+  }, [searchMarks, camera, viewport]);
 
   const select = useCallback(
     (treeId: string | null) => {
@@ -749,8 +772,28 @@ export function MapView({
         const node = current();
         if (node) model.collapseUnder(node.id);
       },
+      exportImage: async (format, scope) => {
+        const baseName = document.name.replace(/\.[^.]+$/, "") || "map";
+        const options = {
+          snapshot: snapshotRef.current,
+          scope,
+          camera: cameraRef.current,
+          viewport: viewportRef.current,
+          marks: searchMarksRef.current,
+        };
+        if (format === "svg") {
+          const { svg } = exportMapSvg(options);
+          downloadMapBlob(
+            new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
+            `${baseName}-map.svg`,
+          );
+          return;
+        }
+        const { blob } = await exportMapPng(options);
+        downloadMapBlob(blob, `${baseName}-map.png`);
+      },
     });
-  }, [model, focusedId, rootId, moveCurrentTo, rowEditing, setNotice]);
+  }, [model, document.name, focusedId, rootId, moveCurrentTo, rowEditing, setNotice]);
 
   const onCanvasPointerDown = useCallback(
     (world: Point, event: ReactPointerEvent<HTMLDivElement>): boolean => {
@@ -968,6 +1011,13 @@ export function MapView({
           bindingTarget={bindingTargetId === node.id}
         />
       ))}
+      {detail !== "bitmap" && traceResult !== null && traceResult.occurrences.length > 0 ? (
+        <TraceArcs
+          snapshot={snapshot}
+          occurrences={traceResult.occurrences}
+          originRange={traceOriginRange}
+        />
+      ) : null}
     </g>
   );
 

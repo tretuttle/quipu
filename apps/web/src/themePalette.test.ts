@@ -28,6 +28,7 @@ import {
   ORCHID_THEME,
   EMBER_THEME,
   GROVE_THEME,
+  HIGH_CONTRAST_THEME,
   IRIS_THEME,
   OCEAN_THEME,
   updateCustomTheme,
@@ -85,6 +86,56 @@ describe("theme files", () => {
         for (const value of Object.values(colors)) {
           expect(toCanonicalThemeColor(value)).toBe(value);
         }
+      }
+    }
+  });
+
+  it("ships a High Contrast light/dark palette with >= 7:1 WCAG AAA body text contrast", () => {
+    expect(BUILT_IN_THEMES.some((theme) => theme.id === "high-contrast")).toBe(true);
+    expect(HIGH_CONTRAST_THEME.label).toBe("High Contrast");
+    expect(getThemeModes(HIGH_CONTRAST_THEME)).toEqual(["light", "dark"]);
+
+    for (const mode of ["light", "dark"] as const) {
+      const colors = getThemeColorsForMode(HIGH_CONTRAST_THEME, mode)!;
+      expect(colors).not.toBeNull();
+      const pairs: ReadonlyArray<readonly [string, string, string]> = [
+        ["text on canvas", colors.text, colors.canvas],
+        ["text on surface", colors.text, colors.surface],
+        ["text on surfaceRaised", colors.text, colors.surfaceRaised],
+        ["textMuted on canvas", colors.textMuted, colors.canvas],
+        ["mutedForeground on muted", colors.mutedForeground, colors.muted],
+        ["toolbarForeground on toolbar", colors.toolbarForeground, colors.toolbar],
+        [
+          "toolbarControlForeground on toolbarControl",
+          colors.toolbarControlForeground,
+          colors.toolbarControl,
+        ],
+        ["accentForeground on accent", colors.accentForeground, colors.accent],
+        ["secondaryForeground on secondary", colors.secondaryForeground, colors.secondary],
+        ["sidebarForeground on sidebar", colors.sidebarForeground, colors.sidebar],
+        ["sidebarMutedForeground on sidebar", colors.sidebarMutedForeground, colors.sidebar],
+        ["codeForeground on codeBackground", colors.codeForeground, colors.codeBackground],
+        ["messageForeground on messageSurface", colors.messageForeground, colors.messageSurface],
+        [
+          "accentSurfaceForeground on accentSurface",
+          colors.accentSurfaceForeground,
+          colors.accentSurface,
+        ],
+        ["errorForeground on errorSurface", colors.errorForeground, colors.errorSurface],
+        ["warningForeground on warningSurface", colors.warningForeground, colors.warningSurface],
+        [
+          "searchMatchForeground on searchMatchBackground",
+          colors.searchMatchForeground,
+          colors.searchMatchBackground,
+        ],
+        [
+          "searchMatchActiveForeground on searchMatchActiveBackground",
+          colors.searchMatchActiveForeground,
+          colors.searchMatchActiveBackground,
+        ],
+      ];
+      for (const [label, fg, bg] of pairs) {
+        expect(contrastRatio(fg, bg), `${mode} ${label}`).toBeGreaterThanOrEqual(7);
       }
     }
   });

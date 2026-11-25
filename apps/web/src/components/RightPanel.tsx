@@ -1,9 +1,29 @@
 import { type CSSProperties, type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { FileTextIcon, type LucideIcon, ScanSearchIcon, XIcon } from "lucide-react";
+import {
+  AlertCircleIcon,
+  BracesIcon,
+  FileTextIcon,
+  type LucideIcon,
+  RouteIcon,
+  ScanSearchIcon,
+  XIcon,
+} from "lucide-react";
+import type { SchemaFailure } from "@quipu/contracts/schema";
 import { commandTitle } from "@quipu/shared/commands";
 
-import { getInspectSource, useDocumentSession } from "../documents/documentSession";
+import {
+  getInspectSource,
+  type OpenDocument,
+  useDocumentSession,
+} from "../documents/documentSession";
 import { SourceView } from "../documents/LazySourceView";
+import { ProblemsPanel } from "../documents/ProblemsPanel";
+import { SchemaPanel } from "../documents/SchemaPanel";
+import { useSchemaStore } from "../documents/schemaStore";
+import { useSearchStore } from "../documents/searchStore";
+import { useSelectionStore } from "../documents/selectionStore";
+import { selectTraceOccurrence } from "../documents/traceActions";
+import { TracePanel } from "../documents/TracePanel";
 import { isElectron } from "../env";
 import { RESIZABLE_WIDTH_PROPERTY, useResizableWidth } from "../hooks/useResizableWidth";
 import { shortcutLabelForCommand } from "../keybindings";
@@ -33,6 +53,9 @@ const RIGHT_PANEL_MAX_WIDTH = 48 * 16;
 const TAB_ICONS: Readonly<Record<RightPanelTab, LucideIcon>> = {
   inspector: ScanSearchIcon,
   source: FileTextIcon,
+  trace: RouteIcon,
+  schema: BracesIcon,
+  problems: AlertCircleIcon,
 };
 
 const TAB_EMPTY_STATES: Readonly<Record<RightPanelTab, { title: string; description: string }>> = {
@@ -44,7 +67,60 @@ const TAB_EMPTY_STATES: Readonly<Record<RightPanelTab, { title: string; descript
     title: "No source to show",
     description: "Open a document to read its text here.",
   },
+  trace: {
+    title: "No trace results",
+    description: "Select a scalar value and run Trace Value to see every exact occurrence.",
+  },
+  schema: {
+    title: "No schema inferred",
+    description: "Open a structured document to infer its schema and generate types.",
+  },
+  problems: {
+    title: "No validation run",
+    description: "Open a structured document to validate it against a local JSON Schema.",
+  },
 };
+
+function pointerToJsonPath(pointer: string): string {
+  if (pointer === "" || pointer === "/") return "$";
+  const parts = pointer
+    .split("/")
+    .slice(1)
+    .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let out = "$";
+  for (const segment of parts) {
+    if (/^(?:0|[1-9][0-9]*)$/.test(segment)) out += `[${segment}]`;
+    else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment)) out += `.${segment}`;
+    else out += `[${JSON.stringify(segment)}]`;
+  }
+  return out;
+}
+
+async function selectFailureLocation(doc: OpenDocument, failure: SchemaFailure): Promise<void> {
+  const queries: string[] = [];
+  if (failure.entryIndex !== undefined) {
+    const suffix = failure.pointer ? pointerToJsonPath(failure.pointer).slice(1) : "";
+    if (suffix.length > 0) queries.push(`$.log.entries[${failure.entryIndex}]${suffix}`);
+    queries.push(`$.log.entries[${failure.entryIndex}]`);
+  } else {
+    queries.push(pointerToJsonPath(failure.pointer));
+  }
+  for (const query of queries) {
+    const res = await doc.queries.path(query, 1).catch(() => null);
+    const first = res?.results[0];
+    if (!first) continue;
+    const found = await doc.source.nodeAt(first.node.span.start).catch(() => null);
+    const innermost = found?.path[found.path.length - 1];
+    useSelectionStore.getState().select({
+      documentId: doc.documentId,
+      ref: first.node.ref,
+      range: { start: first.node.span.start, end: first.node.span.end },
+      origin: "search",
+      path: innermost === undefined ? null : (found?.path ?? null),
+    });
+    return;
+  }
+}
 
 function RightPanelEmptyState({ tab }: { tab: RightPanelTab }) {
   const Icon = TAB_ICONS[tab];
@@ -105,13 +181,15 @@ function RightPanelTabBar({ sheet }: { readonly sheet: boolean }) {
         role="tablist"
         aria-label="Right panel"
         aria-orientation="horizontal"
-        className="flex min-w-0 items-center gap-1"
+        className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
         onKeyDown={handleKeyDown}
       >
         {RIGHT_PANEL_TABS.map((tab) => {
           const selected = tab === activeTab;
           const Icon = TAB_ICONS[tab];
-          const shortcut = shortcutLabelForCommand(keybindings, RIGHT_PANEL_TAB_COMMANDS[tab]);
+          const tabCommand = RIGHT_PANEL_TAB_COMMANDS[tab];
+          const shortcut = tabCommand ? shortcutLabelForCommand(keybindings, tabCommand) : null;
+          const tip = tabCommand ? commandTitle(tabCommand) : RIGHT_PANEL_TAB_LABELS[tab];
           return (
             <Tooltip key={tab}>
               <TooltipTrigger
@@ -143,7 +221,7 @@ function RightPanelTabBar({ sheet }: { readonly sheet: boolean }) {
                 <span className="truncate">{RIGHT_PANEL_TAB_LABELS[tab]}</span>
               </TooltipTrigger>
               <TooltipPopup side="bottom">
-                {commandTitle(RIGHT_PANEL_TAB_COMMANDS[tab])}
+                {tip}
                 {shortcut ? ` (${shortcut})` : ""}
               </TooltipPopup>
             </Tooltip>
@@ -186,7 +264,16 @@ function CloseSheetButton() {
 function RightPanelBody({ sheet }: { readonly sheet: boolean }) {
   const activeTab = useRightPanelStore((state) => state.activeTab);
   const session = useDocumentSession((state) => state.session);
-  const tree = session.phase === "open" ? session.document.tree : null;
+  const openDoc = session.phase === "open" ? session.document : null;
+  const tree = openDoc?.tree ?? null;
+  const schemaShape = useSchemaStore((state) => state.shape);
+  const inferredSchemaText = useSchemaStore((state) => state.inferredSchemaText);
+  const inferring = useSchemaStore((state) => state.inferring);
+  const inferError = useSchemaStore((state) => state.inferError);
+  const validating = useSchemaStore((state) => state.validating);
+  const validationResult = useSchemaStore((state) => state.validationResult);
+  const validationError = useSchemaStore((state) => state.validationError);
+
   return (
     <>
       <RightPanelTabBar sheet={sheet} />
@@ -197,10 +284,42 @@ function RightPanelBody({ sheet }: { readonly sheet: boolean }) {
         className="flex min-h-0 flex-1 flex-col"
         data-right-panel-surface-content
       >
-        {activeTab === "source" && session.phase === "open" ? (
-          <SourceView key={session.document.documentId} document={session.document} compact />
+        {activeTab === "source" && openDoc !== null ? (
+          <SourceView key={openDoc.documentId} document={openDoc} compact />
         ) : activeTab === "inspector" && tree !== null ? (
           <Inspector tree={tree} source={getInspectSource()} />
+        ) : activeTab === "trace" && openDoc !== null && tree !== null ? (
+          <TracePanel onSelectOccurrence={(occ) => void selectTraceOccurrence(openDoc, occ)} />
+        ) : activeTab === "schema" && openDoc !== null && tree !== null ? (
+          <SchemaPanel
+            shape={schemaShape}
+            loading={inferring}
+            error={inferError}
+            onInfer={() => void useSchemaStore.getState().infer(openDoc)}
+            onFieldClick={(pathQuery) => {
+              useSearchStore.getState().setPathText(pathQuery);
+              useSearchStore.getState().open("path");
+              void useSearchStore.getState().runPath();
+            }}
+            onValidateWithSchema={() =>
+              void useSchemaStore.getState().prepareValidationFromShape(openDoc)
+            }
+            onGenerateTypes={() => void useSchemaStore.getState().openCodegen(openDoc)}
+          />
+        ) : activeTab === "problems" && openDoc !== null && tree !== null ? (
+          <ProblemsPanel
+            key={openDoc.documentId}
+            inferredSchemaText={inferredSchemaText}
+            isHar={openDoc.format === "har"}
+            validating={validating}
+            schemaError={validationError}
+            result={validationResult}
+            onValidate={(schemaText, filter) =>
+              void useSchemaStore.getState().validate(openDoc, schemaText, filter)
+            }
+            onClear={() => useSchemaStore.getState().clearValidation()}
+            onSelectFailure={(failure) => void selectFailureLocation(openDoc, failure)}
+          />
         ) : (
           <RightPanelEmptyState tab={activeTab} />
         )}

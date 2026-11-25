@@ -227,10 +227,10 @@ describe("path queries", () => {
     const { host, documentId } = await openText("{}");
     try {
       const error = await host
-        .handle({ _tag: "pathQuery", documentId, path: "$.a[?(@.b)]", limit: 10 })
+        .handle({ _tag: "pathQuery", documentId, path: "$[(@.length-1)]", limit: 10 })
         .catch((e: unknown) => e);
       expect(error).toBeInstanceOf(InvalidPathError);
-      expect((error as InvalidPathError).at).toBe(4);
+      expect((error as InvalidPathError).at).toBe(2);
       expect((error as InvalidPathError).detail).toContain("jq bar");
     } finally {
       await host.handle({ _tag: "close", documentId });
@@ -339,6 +339,8 @@ const selectOne = (value: Json, selector: Selector): Json[] => {
       const at = selector.index < 0 ? value.length + selector.index : selector.index;
       return at >= 0 && at < value.length ? [value[at] as Json] : [];
     }
+    case "filter":
+      return [];
     case "slice": {
       if (!Array.isArray(value)) return [];
       const len = value.length;
@@ -730,4 +732,126 @@ describe("the jq bar", () => {
       await host.handle({ _tag: "close", documentId: info.documentId });
     }
   }, 60_000);
+
+  it("attaches suggestedPath to JqSubtreeTooLargeError and runs jqElement per element in order", async () => {
+    const har = JSON.stringify({
+      log: {
+        version: "1.2",
+        entries: [
+          { request: { url: "https://a.test/1" }, response: { status: 200 } },
+          { request: { url: "https://b.test/2" }, response: { status: 404 } },
+          { request: { url: "https://c.test/3" }, response: { status: 500 } },
+        ],
+      },
+    });
+    const { host, documentId } = await openText(
+      har,
+      { regionBytes: 128, tokenBudget: 6 },
+      {
+        runJq: async (input, program) => {
+          const parsed = readJson(input) as {
+            request: { url: string };
+            response: { status: number };
+          };
+          // Delay earlier items more to prove deterministic element ordering.
+          const delayTurns = parsed.response.status === 200 ? 6 : 1;
+          for (let t = 0; t < delayTurns; t++) await Promise.resolve();
+          if (program === ".request.url") {
+            return {
+              status: "ok",
+              output: JSON.stringify(parsed.request.url) + "\n",
+              truncated: false,
+              message: "",
+            };
+          }
+          return { status: "ok", output: "", truncated: false, message: "" };
+        },
+      },
+    );
+    const harHost = new EngineHost(
+      platformFor({
+        runJq: async (input) => {
+          const parsed = readJson(input) as {
+            request: { url: string };
+            response: { status: number };
+          };
+          const delayTurns = parsed.response.status === 200 ? 6 : 1;
+          for (let t = 0; t < delayTurns; t++) await Promise.resolve();
+          return {
+            status: "ok",
+            output: JSON.stringify(parsed.request.url) + "\n",
+            truncated: false,
+            message: "",
+          };
+        },
+      }),
+      { regionBytes: 128, tokenBudget: 6 },
+    );
+    const harInfo = await harHost.handle({
+      _tag: "open",
+      source: new Blob([har]),
+      name: "cap.har",
+    });
+    try {
+      const root = await harHost.handle({ _tag: "root", documentId: harInfo.documentId });
+      const suggested = await harHost.suggestJqElementPath(root.ref);
+      expect(suggested?.path).toBe(".log.entries");
+      expect(suggested?.count).toBe(3);
+
+      const res = await harHost.jqElement({
+        ref: root.ref,
+        program: ".request.url",
+        timeoutMs: 2000,
+        concurrency: 4,
+      });
+      expect(res.status).toBe("ok");
+      expect(res.path).toBe(".log.entries");
+      expect(res.total).toBe(3);
+      expect(res.processed).toBe(3);
+      expect(res.errors).toEqual([]);
+      expect(res.output).toBe('"https://a.test/1"\n"https://b.test/2"\n"https://c.test/3"\n');
+    } finally {
+      await harHost.handle({ _tag: "close", documentId: harInfo.documentId });
+      await host.handle({ _tag: "close", documentId });
+    }
+  });
+
+  it("suggests the largest top-level array for JSON and isolates oversized elements in jqElement", async () => {
+    const doc = JSON.stringify({
+      small: [1],
+      records: [{ n: 1 }, { n: 2 }, { n: 3 }],
+    });
+    const { host, documentId } = await openText(
+      doc,
+      {},
+      {
+        runJq: async (input) => {
+          const item = readJson(input) as { n: number };
+          if (item.n === 2) {
+            return { status: "error", output: "", truncated: false, message: "element 1 error" };
+          }
+          return { status: "ok", output: String(item.n) + "\n", truncated: false, message: "" };
+        },
+      },
+    );
+    try {
+      const root = await host.handle({ _tag: "root", documentId });
+      const suggested = await host.suggestJqElementPath(root.ref);
+      expect(suggested?.path).toBe(".records");
+      expect(suggested?.count).toBe(3);
+
+      const res = await host.jqElement({
+        ref: root.ref,
+        program: ".n",
+        timeoutMs: 2000,
+      });
+      expect(res.status).toBe("partial");
+      expect(res.output).toBe("1\n3\n");
+      expect(res.errors).toHaveLength(1);
+      expect(res.errors[0]?.index).toBe(1);
+      expect(res.errors[0]?.message).toBe("element 1 error");
+    } finally {
+      await host.handle({ _tag: "close", documentId });
+    }
+  });
 });

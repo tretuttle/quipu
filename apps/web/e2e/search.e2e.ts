@@ -168,6 +168,10 @@ describe("path queries and jq", () => {
 
       await input.fill("$.items[?(@.id)]");
       await input.press("Enter");
+      await page.getByText("40 results", { exact: true }).waitFor();
+
+      await input.fill("$[(@.length-1)]");
+      await input.press("Enter");
       await page
         .getByRole("alert")
         .filter({ hasText: /jq bar/ })

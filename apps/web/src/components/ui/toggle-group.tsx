@@ -30,7 +30,9 @@ function ToggleGroup({
           ? "*:pointer-coarse:after:min-w-auto"
           : "*:pointer-coarse:after:min-h-auto",
         variant === "segmented"
-          ? "gap-0.5 rounded-lg bg-input/40 p-0.5"
+          ? size === "header-segmented"
+            ? "gap-0.5 @max-[48rem]/workspace-header:gap-0 rounded-lg bg-input/40 p-0.5"
+            : "gap-0.5 rounded-lg bg-input/40 p-0.5"
           : variant === "default"
             ? "gap-0.5"
             : orientation === "horizontal"

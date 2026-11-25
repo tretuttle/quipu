@@ -560,6 +560,14 @@
   --map-decoded-stroke: color-mix(in oklab, var(--success) 70%, var(--foreground));
   --font-hand: "Kalam", "Segoe Print", "Bradley Hand", "Comic Sans MS", "Chalkboard", cursive;
 
+  &[data-theme-id="high-contrast"]:not(.dark) {
+    --tree-row-selected: color-mix(
+      in srgb,
+      color-mix(in srgb, var(--primary) 60%, var(--foreground)) 9%,
+      var(--background)
+    );
+  }
+
   @variant dark {
     color-scheme: dark;
     /* Keep controls and floating surfaces close to the neutral-black canvas.

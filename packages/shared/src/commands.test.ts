@@ -5,7 +5,7 @@ import { COMMAND_GROUPS, COMMANDS, commandsByGroup, commandTitle } from "./comma
 import { DEFAULT_KEYBINDINGS, parseKeybindingShortcut } from "./keybindings.ts";
 
 /** Names that keep their capital letter inside a sentence-case title. */
-const PROPER_WORDS = new Set(["Inspector", "Source", "A", "Z"]);
+const PROPER_WORDS = new Set(["Inspector", "Source", "A", "Z", "PNG", "SVG"]);
 
 describe("command titles", () => {
   it("name every command once, in the order the contracts list them", () => {

@@ -1,6 +1,14 @@
 import { LegendList } from "@legendapp/list/react";
 import { JQ_OUTPUT_LIMIT_BYTES, MAX_SLICE_BYTES, type PathMatch } from "@quipu/contracts/engine";
-import { CaseSensitiveIcon, ChevronDownIcon, ChevronUpIcon, RegexIcon, XIcon } from "lucide-react";
+import {
+  CaseSensitiveIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  FilterIcon,
+  LayersIcon,
+  RegexIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -14,6 +22,7 @@ import { shortcutLabelForCommand } from "~/keybindings";
 import { cn } from "~/lib/utils";
 import { formatBytes } from "~/lib/formatBytes";
 import type { OpenDocument } from "./documentSession.ts";
+import { useMatchFilterStore } from "./hitFilter.ts";
 import {
   type JqScope,
   jqScopeOf,
@@ -164,6 +173,7 @@ function FindPanel({
   const text = useSearchStore((state) => state.text);
   const mode = useSearchStore((state) => state.mode);
   const caseSensitive = useSearchStore((state) => state.caseSensitive);
+  const deepDecode = useSearchStore((state) => state.deepDecode);
   const phase = useSearchStore((state) => state.phase);
   const summary = useSearchStore((state) => state.summary);
   const error = useSearchStore((state) => state.error);
@@ -172,8 +182,11 @@ function FindPanel({
   const setText = useSearchStore((state) => state.setText);
   const setMode = useSearchStore((state) => state.setMode);
   const setCaseSensitive = useSearchStore((state) => state.setCaseSensitive);
+  const setDeepDecode = useSearchStore((state) => state.setDeepDecode);
   const run = useSearchStore((state) => state.run);
   const step = useSearchStore((state) => state.step);
+  const refreshMatchFilter = useSearchStore((state) => state.refreshMatchFilter);
+  const matchFilterEnabled = useMatchFilterStore((state) => state.enabled);
   const inputRef = useFocusOnOpen("find");
 
   // Search as the user types, once they pause; the options search again at once.
@@ -183,10 +196,10 @@ function FindPanel({
     const timer = setTimeout(() => {
       // Enter may have searched this query already while the pause ran.
       const searched = useSearchStore.getState().searched;
-      if (searched !== searchKey(documentId, mode, caseSensitive, text)) void run();
+      if (searched !== searchKey(documentId, mode, caseSensitive, text, deepDecode)) void run();
     }, TYPE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [text, mode, caseSensitive, documentId, run]);
+  }, [text, mode, caseSensitive, deepDecode, documentId, run]);
 
   // Counting from the user's selection is said beside the count, not only in its tooltip.
   const afterSelection = phase === "done" && startedFrom === "selection" && current !== null;
@@ -227,7 +240,7 @@ function FindPanel({
             // A query that has not been searched yet is searched now, not after the pause.
             if (
               useSearchStore.getState().searched !==
-              searchKey(documentId, mode, caseSensitive, text)
+              searchKey(documentId, mode, caseSensitive, text, deepDecode)
             ) {
               void run();
             } else void step(event.shiftKey ? -1 : 1);
@@ -263,6 +276,51 @@ function FindPanel({
           </TooltipTrigger>
           <TooltipPopup side="bottom">Regular expression</TooltipPopup>
         </Tooltip>
+        {document.tree !== null ? (
+          <>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Toggle
+                    size="xs"
+                    aria-label="Deep decode"
+                    data-deep-decode=""
+                    pressed={deepDecode}
+                    onPressedChange={setDeepDecode}
+                  />
+                }
+              >
+                <LayersIcon />
+                <span className="hidden sm:inline">Deep</span>
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">
+                Search inside decoded Base64, gzip, JWT, form, and JSON strings
+              </TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Toggle
+                    size="xs"
+                    aria-label="Show matches only"
+                    data-match-filter=""
+                    pressed={matchFilterEnabled}
+                    onPressedChange={(pressed) => {
+                      useMatchFilterStore.getState().setEnabled(pressed);
+                      if (pressed) void refreshMatchFilter();
+                    }}
+                  />
+                }
+              >
+                <FilterIcon />
+                <span className="hidden sm:inline">Matches only</span>
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">
+                Filter Tree, Map, and Table views to matches only
+              </TooltipPopup>
+            </Tooltip>
+          </>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -459,11 +517,15 @@ function JqPanel({ document }: { readonly document: OpenDocument }) {
   const program = useSearchStore((state) => state.jqProgram);
   const phase = useSearchStore((state) => state.jqPhase);
   const result = useSearchStore((state) => state.jqResult);
+  const elementResult = useSearchStore((state) => state.jqElementResult);
+  const suggestedPath = useSearchStore((state) => state.jqSuggestedPath);
   const error = useSearchStore((state) => state.jqError);
   const picked = useSearchStore((state) => state.jqScope);
   const setProgram = useSearchStore((state) => state.setJqProgram);
   const setScope = useSearchStore((state) => state.setJqScope);
   const runJq = useSearchStore((state) => state.runJq);
+  const runJqElement = useSearchStore((state) => state.runJqElement);
+  const loadJqSuggestion = useSearchStore((state) => state.loadJqSuggestion);
   const selection = useSelectionStore((state) => state.selection);
   const inputRef = useFocusOnOpen("jq");
 
@@ -475,6 +537,14 @@ function JqPanel({ document }: { readonly document: OpenDocument }) {
       ? selected.range.end - selected.range.start
       : document.size;
   const tooLarge = bytes > MAX_SLICE_BYTES;
+
+  const targetRef =
+    scope === "selection" && selected !== null
+      ? selected.ref
+      : { documentId: document.documentId, tapeId: 0, token: 0 };
+  useEffect(() => {
+    if (tooLarge) void loadJqSuggestion(targetRef.documentId, targetRef.tapeId, targetRef.token);
+  }, [tooLarge, targetRef.documentId, targetRef.tapeId, targetRef.token, loadJqSuggestion]);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -493,6 +563,7 @@ function JqPanel({ document }: { readonly document: OpenDocument }) {
             if (event.key !== "Enter") return;
             event.preventDefault();
             if (!tooLarge) void runJq();
+            else if (suggestedPath !== null) void runJqElement(suggestedPath);
           }}
         />
         <ToggleGroup
@@ -519,11 +590,25 @@ function JqPanel({ document }: { readonly document: OpenDocument }) {
         </Button>
       </div>
       {tooLarge ? (
-        <p role="alert" data-jq-refusal="" className="text-xs text-warning-foreground">
-          {scope === "document"
-            ? `The document is ${formatBytes(bytes)}; jq runs on up to ${formatBytes(MAX_SLICE_BYTES)}. Select a value in it and run jq on the selected value.`
-            : `The selected value is ${formatBytes(bytes)}; jq runs on up to ${formatBytes(MAX_SLICE_BYTES)}. Select a smaller value.`}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p role="alert" data-jq-refusal="" className="text-xs text-warning-foreground">
+            {scope === "document"
+              ? `The document is ${formatBytes(bytes)}; jq runs on up to ${formatBytes(MAX_SLICE_BYTES)}. Select a value in it and run jq on the selected value.`
+              : `The selected value is ${formatBytes(bytes)}; jq runs on up to ${formatBytes(MAX_SLICE_BYTES)}. Select a smaller value.`}
+          </p>
+          {suggestedPath !== null ? (
+            <Button
+              size="xs"
+              variant="outline"
+              data-jq-element-run=""
+              disabled={phase === "searching"}
+              onClick={() => void runJqElement(suggestedPath)}
+            >
+              {phase === "searching" ? <Spinner size="xs" /> : null}
+              Run per element of {suggestedPath}
+            </Button>
+          ) : null}
+        </div>
       ) : (
         <p data-jq-scope="" className="text-xs text-muted-foreground">
           {scope === "document"
@@ -534,6 +619,15 @@ function JqPanel({ document }: { readonly document: OpenDocument }) {
       {phase === "error" && error !== null ? (
         <p role="alert" data-jq-refusal="" className="text-xs text-destructive-foreground">
           {error}
+        </p>
+      ) : null}
+      {phase === "done" && elementResult !== null ? (
+        <p data-jq-element-status="" className="text-xs text-muted-foreground">
+          Processed {count.format(elementResult.processed)} of {count.format(elementResult.total)}{" "}
+          elements in {elementResult.path}
+          {elementResult.errors.length > 0
+            ? ` · ${count.format(elementResult.errors.length)} failed`
+            : ""}
         </p>
       ) : null}
       {phase === "done" && result !== null ? (

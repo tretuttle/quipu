@@ -40,11 +40,9 @@ Prebuilt desktop binaries for Windows (`x64` installer) and Linux (`x86_64` AppI
 
 ### Requirements
 
-- Windows (`x64`) or Linux (`x86_64`) for desktop builds (no macOS build yet).
-- **Node.js** `24.13.1+`
-- **pnpm** `11.10.0` (`corepack enable` picks this up automatically from `package.json`; `npm` is not supported because the workspace uses pnpm catalogs).
-
-Everything else (Vite+, Electron, and test tooling) installs locally via `pnpm install`.
+- Windows (`x64`) or Linux (`x86_64`) for desktop builds
+- Node.js `24.13.1+`
+- pnpm `11.10.0`
 
 ```sh
 git clone https://github.com/tretuttle/quipu.git

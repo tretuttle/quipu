@@ -12,19 +12,36 @@ Open, search, decode, edit, diff, and inspect JSON and HAR files locally in the 
 
 ## What Quipu does
 
-- **Linked views.** Switch between Map (HAR grouped by host, page, and request), virtualized Tree, virtualized Table (with a HAR request preset, SVG timing waterfall, and status-colored timeline scrubber), and byte-virtualized Source without losing your selection. Compare opens a two-document diff mode. (Converted read-only formats show an unlinked Source view.)
-- **In-place decoding and deep search.** Decode nested stringified JSON, base64, data URLs, gzip streams, JWTs (marked unverified), GraphQL queries, URL-encoded forms, NDJSON, SVG and raster image previews, and HAR WebSocket frames per node, in bulk, or via per-kind auto-decode. Turn on **Deep decode** in the search bar to scan inside encoded payloads up to 8 stringified layers deep and inspect the decode chain.
-- **Exact value tracing and match filtering.** Select any scalar to find every exact occurrence across a capture (including encoded payloads), grouped by HAR entry and section with optional transient trace arcs on the map. Toggle **Show matches only** to filter Tree, Map, and Table to matching nodes and their ancestors.
-- **Search, JSONPath, and `jq`.** Parallel literal and regex search with worker timeouts, JSONPath queries including `[?(...)]` filter predicates, and `jq` (`jq-wasm 3.0.0`, bundling `jq 1.8.2`) either directly up to `64 MiB` or in per-element streaming mode across larger arrays and HAR captures.
-- **Real editing and streaming export.** Edit JSON and HAR values, rename keys, edit subtrees (`F2`), sort objects or arrays, format, and minify with unlimited undo/redo and crash-recovery journals. Search works immediately after sorts and reformats without saving first. Export to JSON, YAML, TOML, XML, CSV, TSV, or NDJSON with pre-flight structural checks.
-- **Diff, schema, and type generation.** Compare two JSON files structurally (with array identity matching and Myers LCS) or match HAR captures by `(method, url_without_fragment, _resourceType)` with `F7` stepping and inline body diffs. Infer shapes across every record, validate against local JSON Schema (draft 2020-12 and draft-07), and generate types for nine targets (TypeScript, Rust, Go, Python dataclasses, Python Pydantic, Kotlin, C#, Swift, and JSON Schema).
-- **Map annotations and themes.** Draw shapes, sticky notes, freehand ink, and node-bound arrows on standalone boards or over the map, and export the visible or whole map to PNG or SVG (up to `8192 px`). Includes six named themes plus Graphite, a `7:1` contrast High Contrast palette, an OKLCH editor, and VS Code theme import.
+### HAR table, timing waterfall, and linked views
+
+Switch between Map (HAR grouped by host, page, and request), virtualized Tree, virtualized Table, and byte-virtualized Source without losing your selection. For HAR files, Table includes per-column filters, an SVG timing waterfall, and a status-colored timeline scrubber you can drag to filter a time window.
 
 ![HAR request table with SVG waterfall and timeline scrubber in Quipu](docs/images/table.png)
 
-![HAR capture diff with inline body diff in Quipu](docs/images/compare.png)
+### In-place decoding, deep search, and value tracing
 
-![Decoding nested payloads inside Quipu](docs/images/decode.png)
+Decode nested stringified JSON, base64, data URLs, gzip streams, JWTs (marked unverified), GraphQL queries, URL-encoded forms, NDJSON, SVG and raster previews, and HAR WebSocket frames per node, in bulk, or via per-kind auto-decode. Turn on **Deep decode** in the search bar to search inside encoded payloads up to 8 stringified layers deep and inspect the decode chain, select any scalar to trace every exact occurrence across a capture with optional map arcs, or toggle **Show matches only** to filter Tree, Map, and Table to matching nodes and their ancestors.
+
+![Decoding nested form, JSON, base64, and JWT payloads inline on the map](docs/images/decode.png)
+
+### HAR and structural JSON diff
+
+Compare two HAR captures by `(method, url_without_fragment, _resourceType)` with status filters, a request change list, `F7` stepping, and inline JSON body diffs, or switch to **JSON Tree** to diff two JSON files structurally with array identity matching and Myers LCS.
+
+![HAR capture diff with inline body diff and request change list](docs/images/compare.png)
+
+### Querying, editing, schema, and export
+
+- **Search, JSONPath, and `jq`:** Parallel literal and regex search, JSONPath queries with `[?(...)]` filter predicates, and `jq` directly up to `64 MiB` or in per-element streaming mode across larger arrays and HAR captures.
+- **Editing and transforms:** Edit JSON and HAR values inline, rename keys, edit subtrees (`F2`), sort objects or arrays, format, and minify with unlimited undo/redo and crash-recovery journals. Search stays live after sorts and reformats without saving first.
+- **Schema and type generation:** Infer shapes across every record, validate against local JSON Schema (draft 2020-12 and draft-07), and generate types for TypeScript, Rust, Go, Python (dataclasses and Pydantic), Kotlin, C#, Swift, and JSON Schema.
+- **Streaming export:** Convert to JSON, YAML, TOML, XML, CSV, TSV, or NDJSON with pre-flight structural checks.
+
+### Boards, map annotations, and themes
+
+Sketch flows on standalone boards or annotate directly over a map with shapes, sticky notes, freehand ink, and node-bound arrows, then export the visible or whole map to PNG or SVG (up to `8192 px`). Includes Graphite plus six named themes, a `7:1` contrast High Contrast palette, an OKLCH theme editor, and VS Code theme import.
+
+![Standalone diagram board in Quipu](docs/images/board.png)
 
 ## How it works
 

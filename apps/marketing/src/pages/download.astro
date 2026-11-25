@@ -43,7 +43,7 @@ const platforms =
       <p class="lede">
         {
           release !== null
-            ? `Version ${release.version}. The desktop app runs the same local-first canvas as the browser. No account, no telemetry.`
+            ? `Version ${release.version}. Runs the same engine as the browser build with native file access. No account, no telemetry.`
             : "Downloads will appear here with the first release."
         }
       </p>
@@ -86,8 +86,16 @@ const platforms =
       {
         webAppPath !== null && (
           <>
-            {release !== null ? " Prefer not to install anything?" : " Until then,"}{" "}
-            <a href={webAppPath}>open Quipu in your browser</a>.
+            {release !== null ? (
+              <>
+                {" "}Prefer not to install anything?{" "}
+                <a href={webAppPath}>Open Quipu in your browser</a>.
+              </>
+            ) : (
+              <>
+                {" "}Until then, <a href={webAppPath}>open Quipu in your browser</a>.
+              </>
+            )}
           </>
         )
       }

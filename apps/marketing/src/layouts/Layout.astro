@@ -11,7 +11,7 @@ interface Props {
 
 const {
   title = "Quipu",
-  description = "Quipu is a local-first data canvas. Open any data file and see it as a map you can search, decode, edit, convert and draw on.",
+  description = "Open, search, decode, edit, diff, and inspect JSON and HAR files locally in the browser or desktop app. Tested to 2 GB HAR (4 GiB limit).",
   pageClass,
 } = Astro.props;
 ---
@@ -76,11 +76,11 @@ const {
       <footer class="footer">
         <div class="footer-inner">
           <div class="footer-brand">
-            <span>Quipu · a local-first data canvas · no accounts, no telemetry</span>
+            <span>Quipu · JSON and HAR viewer and editor · MIT</span>
           </div>
           <div class="footer-links">
             <a href="/#features">Features</a>
-            <a href="/#privacy">Privacy</a>
+            <a href="/#limits">Limits</a>
             <a href={DOWNLOAD_PAGE_PATH}>Download</a>
             {SITE.webAppPath !== null && <a href={SITE.webAppPath}>Open the app</a>}
           </div>
@@ -102,8 +102,6 @@ const {
 </html>
 
 <style is:global>
-  /* Token names and default values follow apps/web/src/index.css, so the site and
-     the app look like one product. The icon files are copies of the web app's. */
   :root {
     color-scheme: light dark;
     --background: oklch(99.2% 0 0);
@@ -249,7 +247,6 @@ const {
     border-radius: 4px;
   }
 
-  /* Page-load sequence: [data-rise] plays once with delay --d. */
   @keyframes rise {
     from {
       opacity: 0;

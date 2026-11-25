@@ -6,51 +6,58 @@ const { release, webAppPath } = SITE;
 
 const features = [
   {
-    id: "map",
-    name: "Map",
-    text: "The document is a node-link map on an infinite canvas. Collapse and expand any node, find your way with the minimap, and switch to the tree or source view without losing the selection.",
+    id: "views",
+    name: "Map, tree, table, and source",
+    text: "Switch views without losing your selection. HAR files group by host, page, and request on the map and open in a sortable request table with an SVG timing waterfall and timeline scrubber.",
   },
   {
     id: "decode",
-    name: "Decode",
-    text: "Nested JSON strings open in place and are escaped again when you save. Base64 images preview, JWTs decode (the signature is never verified), and URL-encoded forms, GraphQL queries, NDJSON and WebSocket frames open as structure, one value at a time or automatically.",
+    name: "Decode and trace",
+    text: "Decode nested stringified JSON, base64, gzip, JWTs (marked unverified), GraphQL, forms, NDJSON, SVG and raster images, and WebSocket frames. Turn on Deep decode to search inside encoded payloads and trace exact values across requests.",
   },
   {
-    id: "search",
-    name: "Search",
-    text: "Literal and regular-expression search, with hits lit in every view. Path queries jump straight to a node, and a jq bar runs over the whole document or the selection.",
+    id: "query",
+    name: "Search, JSONPath, and jq",
+    text: "Parallel literal and regex search with worker timeouts, JSONPath filter predicates, and match-only filtering across views. jq runs directly up to 64 MiB or streams per element across larger arrays and HAR captures.",
   },
   {
     id: "edit",
-    name: "Edit",
-    text: "Edit values and keys in JSON and HAR files, sort, format and minify, with undo and redo. Unsaved edits come back after a crash or reload. Save to the file, or export to JSON, YAML, TOML, XML or CSV.",
+    name: "Edit and convert",
+    text: "Edit JSON and HAR values, rename keys, sort, format, and minify through a zero-copy PieceTable with unlimited undo and crash-recovery journals. Export to JSON, YAML, TOML, XML, CSV, TSV, or NDJSON.",
   },
   {
-    id: "draw",
-    name: "Draw",
-    text: "Shapes, arrows, freehand, text, sticky notes and frames, on a blank board or over the map. On the map, arrows and notes attach to data nodes and follow them when the layout changes.",
+    id: "diff-schema",
+    name: "Diff, schema, and codegen",
+    text: "Diff two JSON files structurally or match HAR captures by method, URL, and resource type with inline body diffs. Infer shapes across all records, validate against local JSON Schema, and generate types for nine targets.",
   },
   {
-    id: "themes",
-    name: "Themes",
-    text: "Built-in palettes, a theme editor, and VS Code color themes from Open VSX or a file. The map, the source view and the drawing ink recolor together.",
+    id: "annotate",
+    name: "Annotate and export",
+    text: "Attach notes, shapes, freehand ink, and bound arrows to map nodes or blank boards, and export the visible or full map to PNG or SVG. Ships with light, dark, and 7:1 contrast palettes plus VS Code theme import.",
   },
 ] as const;
 
-const formats = ["JSON", "JSONC", "HAR", "NDJSON", "YAML", "TOML", "XML", "CSV", "TSV", "Any file as text"];
+const formats = ["JSON", "JSONC", "HAR", "NDJSON", "YAML", "TOML", "XML", "CSV", "TSV", "Plain text"];
 
-const privacy = [
+const numbers = [
+  { value: "366 ms", label: "First paint on a 1.86 GiB HAR (1.60 s full index, 1.50 GiB pre-deep RSS, median of 3)" },
+  { value: "1.46 s", label: "Parallel search across 40,398 requests (7.95 s with deep base64 decode, median of 3)" },
+  { value: "5.57 s", label: "HAR capture diff against a 1-edit copy including opening File B (40,397 same, 1 changed, median of 3)" },
+  { value: "37 ms", label: "Live scalar edit on a 1.86 GiB HAR via PieceTable (single measured run)" },
+] as const;
+
+const limits = [
   {
-    name: "Local-first",
-    text: "Files are read where they live. Settings, recent files and drawings are kept in your browser or your app-data folder, never on a server.",
+    name: "Network isolation",
+    text: "JSON and HAR files stay on disk and are read in 8 MiB slices. Content Security Policy restricts outbound hosts to Open VSX when browsing themes, and web end-to-end tests fail on any unexpected network request.",
   },
   {
-    name: "No accounts",
-    text: "There is nothing to sign up for and nothing to sign in to. Quipu has no server and no AI features.",
+    name: "Format and size limits",
+    text: "Tested to a 2.00 GB (1.86 GiB) HAR and 100 MiB JSON, with a hard 4 GiB minus 1 byte address limit for JSON and HAR editing. YAML and TOML parse whole up to 256 MiB and open read-only alongside JSONC, NDJSON, XML, CSV, and TSV.",
   },
   {
-    name: "No telemetry",
-    text: "No analytics, no tracking, no crash reporting. The only network requests Quipu makes are to Open VSX, and only while you browse themes.",
+    name: "Runtime requirements",
+    text: "The browser build needs cross-origin isolation (COOP and COEP headers) for SharedArrayBuffer workers. Rendering uses Canvas2D, SVG, and DOM, with no WebGPU required.",
   },
 ] as const;
 ---
@@ -58,14 +65,16 @@ const privacy = [
 <Layout>
   <section class="hero">
     <div class="container hero-inner">
-      <p class="eyebrow" data-rise>A local-first data canvas</p>
+      <p class="eyebrow" data-rise>Browser and desktop · MIT</p>
       <h1 class="hero-title display" data-rise style="--d:90ms">
-        <span>Open any data file.</span> <span class="hero-line">See it as a map.</span>
+        <span>Inspect and edit 2 GB HAR</span>
+        <span class="hero-line">and large JSON files locally.</span>
       </h1>
       <p class="hero-sub" data-rise style="--d:180ms">
-        Quipu turns JSON, HAR, NDJSON, YAML, TOML, XML and CSV files into a map you can search,
-        decode, edit and draw on, with JSON and HAR files of up to 2&nbsp;GB. It runs in a browser tab
-        and as a desktop app. Your files never leave your machine.
+        Quipu streams JSON and HAR files from disk in 8&nbsp;MiB slices across parallel workers and
+        also opens JSONC, NDJSON, YAML, TOML, XML, CSV, and TSV. Search raw or encoded payloads, run
+        jq per element, diff captures, infer schemas, generate types, and edit JSON and HAR files up
+        to the 4&nbsp;GiB address limit.
       </p>
       {
         (release !== null || webAppPath !== null) && (
@@ -103,55 +112,58 @@ const privacy = [
       <div class="hero-map-wrap" data-rise style="--d:420ms">
         <figure class="hero-map tile">
           <svg
-            viewBox="0 0 760 360"
+            viewBox="0 0 780 360"
             role="img"
-            aria-label="A HAR capture drawn as a map: the log object linked to a request and a response, each holding keys and values, with the request body decoded."
+            aria-label="A HAR capture grouped by host, page, and request on the Quipu map, showing a POST entry linked to its decoded base64 JSON payload and PNG response body."
           >
             <g class="edges">
-              <path d="M178 180 C 240 180, 240 84, 300 84" />
-              <path d="M178 180 C 240 180, 240 270, 300 270" />
-              <path d="M468 70 C 520 70, 520 56, 560 56" />
-              <path d="M468 98 C 520 98, 520 128, 560 128" />
-              <path d="M468 256 C 520 256, 520 252, 560 252" />
+              <path d="M188 180 C 234 180, 234 94, 280 94" />
+              <path d="M188 180 C 234 180, 234 264, 280 264" />
+              <path d="M492 78 C 528 78, 528 68, 560 68" />
+              <path d="M492 112 C 528 112, 528 158, 560 158" />
+              <path d="M492 264 C 528 264, 528 264, 560 264" />
             </g>
             <g class="node">
-              <rect x="24" y="140" width="154" height="80" rx="10" />
-              <text x="40" y="168" class="k">log</text>
-              <text x="40" y="192" class="n">version</text>
-              <text x="108" y="192" class="s">"1.2"</text>
-              <text x="40" y="210" class="n">entries</text>
-              <text x="108" y="210" class="b">[ 4,218 ]</text>
+              <rect x="16" y="136" width="172" height="88" rx="10" />
+              <text x="32" y="164" class="k">api.example.com</text>
+              <text x="32" y="188" class="n">page</text>
+              <text x="98" y="188" class="s">"page_1"</text>
+              <text x="32" y="208" class="n">entries</text>
+              <text x="98" y="208" class="b">[ 40,398 ]</text>
             </g>
             <g class="node">
-              <rect x="300" y="44" width="168" height="80" rx="10" />
-              <text x="316" y="72" class="k">request</text>
-              <text x="316" y="96" class="n">method</text>
-              <text x="378" y="96" class="s">"POST"</text>
-              <text x="316" y="114" class="n">postData</text>
-              <text x="388" y="114" class="b">{"{…}"}</text>
+              <rect x="280" y="46" width="212" height="96" rx="10" />
+              <text x="296" y="74" class="k">POST /v1/checkout</text>
+              <text x="296" y="98" class="n">status</text>
+              <text x="372" y="98" class="v">200</text>
+              <text x="296" y="118" class="n">postData</text>
+              <text x="372" y="118" class="b">base64, json</text>
             </g>
             <g class="node">
-              <rect x="300" y="230" width="168" height="80" rx="10" />
-              <text x="316" y="258" class="k">response</text>
-              <text x="316" y="282" class="n">status</text>
-              <text x="372" y="282" class="v">200</text>
-              <text x="316" y="300" class="n">content</text>
-              <text x="378" y="300" class="b">{"{…}"}</text>
+              <rect x="280" y="220" width="212" height="88" rx="10" />
+              <text x="296" y="248" class="k">GET /assets/logo</text>
+              <text x="296" y="272" class="n">status</text>
+              <text x="372" y="272" class="v">200</text>
+              <text x="296" y="292" class="n">content</text>
+              <text x="372" y="292" class="b">{"{…}"}</text>
             </g>
             <g class="node node-decoded">
-              <rect x="560" y="26" width="176" height="60" rx="10" />
-              <text x="576" y="52" class="k">text (decoded)</text>
-              <text x="576" y="72" class="s">"{"{"}"user":"…"{"}"}"</text>
+              <rect x="560" y="24" width="204" height="88" rx="10" />
+              <text x="576" y="50" class="k">decoded (base64, json)</text>
+              <text x="576" y="74" class="n">userId</text>
+              <text x="640" y="74" class="s">"usr_8c41f0"</text>
+              <text x="576" y="94" class="n">total</text>
+              <text x="640" y="94" class="v">4200</text>
             </g>
             <g class="node">
-              <rect x="560" y="98" width="176" height="60" rx="10" />
-              <text x="576" y="124" class="k">headers</text>
-              <text x="576" y="144" class="b">[ 18 ]</text>
+              <rect x="560" y="128" width="204" height="60" rx="10" />
+              <text x="576" y="154" class="k">headers</text>
+              <text x="576" y="174" class="b">[ 18 ]</text>
             </g>
             <g class="node">
-              <rect x="560" y="222" width="176" height="60" rx="10" />
-              <text x="576" y="248" class="k">body</text>
-              <text x="576" y="268" class="s">image/png</text>
+              <rect x="560" y="234" width="204" height="60" rx="10" />
+              <text x="576" y="260" class="k">response.content</text>
+              <text x="576" y="280" class="s">image/png · 18.4 KiB</text>
             </g>
           </svg>
         </figure>
@@ -165,13 +177,35 @@ const privacy = [
     </div>
   </section>
 
+  <section class="section section-alt" aria-labelledby="numbers-title">
+    <div class="container">
+      <div class="section-head">
+        <h2 id="numbers-title" class="display">Measured on a 2 GB (1.86 GiB) HAR</h2>
+        <p>
+          Cold runs on an Intel Core i9-14900, 62&nbsp;GiB RAM, Chromium 148, against the production
+          web build (60.0&nbsp;fps pan across all runs).
+        </p>
+      </div>
+      <div class="numbers-grid">
+        {
+          numbers.map((item) => (
+            <article class="number-card tile">
+              <p class="number-value display">{item.value}</p>
+              <p class="number-label">{item.label}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
   <section id="features" class="section" aria-labelledby="features-title">
     <div class="container">
       <div class="section-head">
-        <h2 id="features-title" class="display">Read, edit and annotate on one canvas</h2>
+        <h2 id="features-title" class="display">Parallel scanning on a segmented tape</h2>
         <p>
-          Quipu combines a data map with a drawing board, so reading a payload and annotating it
-          happen in the same place.
+          Up to 16 worker threads scan JSON and HAR files into a segmented structural tape so
+          indexing, searching, editing, and diffing work on multi-gigabyte captures.
         </p>
       </div>
       <div class="feature-grid">
@@ -187,17 +221,18 @@ const privacy = [
     </div>
   </section>
 
-  <section id="privacy" class="section section-alt" aria-labelledby="privacy-title">
+  <section id="limits" class="section section-alt" aria-labelledby="limits-title">
     <div class="container">
       <div class="section-head">
-        <h2 id="privacy-title" class="display">Your data stays yours</h2>
+        <h2 id="limits-title" class="display">Local by default, with explicit limits</h2>
         <p>
-          A 2&nbsp;GB capture you are not allowed to upload is exactly the file Quipu is built for.
+          No backend, no accounts, and no telemetry. Here is where the engine stops and what the
+          browser build requires.
         </p>
       </div>
       <div class="privacy-grid">
         {
-          privacy.map((item) => (
+          limits.map((item) => (
             <article class="privacy-item">
               <h3>{item.name}</h3>
               <p>{item.text}</p>
@@ -210,11 +245,10 @@ const privacy = [
 
   <section class="section" aria-labelledby="name-title">
     <div class="container name-note">
-      <h2 id="name-title" class="display">Why Quipu?</h2>
+      <h2 id="name-title" class="display">The name</h2>
       <p>
-        A quipu is the Inca record made of knotted cords. Strings hang from strings, and knots hold
-        the values. It was a tree of strings carrying data, five hundred years before JSON. Nested
-        stringified JSON is literally a quipu.
+        A quipu is the Inca record made of knotted cords, where strings hang from strings and knots
+        hold values. It fits nested stringified JSON.
       </p>
     </div>
   </section>
@@ -226,10 +260,10 @@ const privacy = [
           <h2 id="download-title" class="display">Get Quipu</h2>
           <p>
             {release !== null && webAppPath !== null
-              ? "The desktop app for Linux and Windows, or open it right here in the browser."
+              ? "Download the desktop app for Linux or Windows, or open Quipu in your browser."
               : release !== null
-                ? "The desktop app for Linux and Windows."
-                : "Open it right here in the browser."}
+                ? "Download the desktop app for Linux or Windows."
+                : "Open Quipu in your browser."}
           </p>
           <div class="hero-actions">
             {release !== null && (
@@ -263,7 +297,7 @@ const privacy = [
 
   .hero-title {
     margin-top: 18px;
-    font-size: clamp(2.5rem, 6.4vw, 5rem);
+    font-size: clamp(2.3rem, 5.6vw, 4.4rem);
   }
 
   .hero-line {
@@ -272,8 +306,8 @@ const privacy = [
 
   .hero-sub {
     margin-top: 24px;
-    max-width: 44rem;
-    font-size: clamp(1rem, 1.6vw, 1.2rem);
+    max-width: 46rem;
+    font-size: clamp(1rem, 1.5vw, 1.15rem);
     color: var(--muted-foreground);
   }
 
@@ -395,6 +429,28 @@ const privacy = [
     font-size: 1.05rem;
   }
 
+  .numbers-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .number-card {
+    padding: 24px;
+  }
+
+  .number-value {
+    font-family: var(--font-mono);
+    font-size: clamp(1.75rem, 2.6vw, 2.25rem);
+    color: var(--foreground);
+  }
+
+  .number-label {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    color: var(--muted-foreground);
+  }
+
   .feature-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -437,6 +493,10 @@ const privacy = [
   }
 
   @media (max-width: 960px) {
+    .numbers-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .feature-grid,
     .privacy-grid {
       grid-template-columns: 1fr;
@@ -451,6 +511,10 @@ const privacy = [
 
     .section {
       padding: 64px 0;
+    }
+
+    .numbers-grid {
+      grid-template-columns: 1fr;
     }
   }
 </style>

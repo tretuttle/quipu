@@ -129,14 +129,21 @@ describe("the built site, served with the deploy headers", () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/`);
     await expect(page.getByRole("heading", { level: 1 }).innerText()).resolves.toMatch(
-      /Open any data file\.\s*See it as a map\./,
+      /Inspect and edit 2 GB HAR\s*and large JSON files locally\./,
     );
-    for (const name of ["Map", "Decode", "Search", "Edit", "Draw", "Themes"]) {
+    for (const name of [
+      "Map, tree, table, and source",
+      "Decode and trace",
+      "Search, JSONPath, and jq",
+      "Edit and convert",
+      "Diff, schema, and codegen",
+      "Annotate and export",
+    ]) {
       await expect(
         page.getByRole("heading", { level: 3, name, exact: true }).count(),
       ).resolves.toBe(1);
     }
-    for (const name of ["Local-first", "No accounts", "No telemetry"]) {
+    for (const name of ["Network isolation", "Format and size limits", "Runtime requirements"]) {
       await expect(
         page.getByRole("heading", { level: 3, name, exact: true }).count(),
       ).resolves.toBe(1);

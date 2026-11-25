@@ -1,181 +1,112 @@
 # Quipu
 
-Quipu is a local-first data canvas. Open a data file, from a few bytes up to a 2 GB HAR, and see it as a map you can
-search, decode, edit, convert and draw on. It runs as a web app and as a desktop app built from the same code. There
-is no account and no server: your files never leave your machine.
+Open, search, decode, edit, diff, and inspect JSON and HAR files locally in the browser or desktop app. Tested up to a `2.00 GB` (`1.86 GiB`) HAR and `100 MiB` JSON, with a hard `4 GiB - 1 byte` source address limit. Renders with Canvas2D, SVG, and DOM, with no WebGPU requirement, no backend, and no accounts.
 
-![The Map view: an order document as cards joined by edges, with one order selected](docs/images/map.png)
+![Quipu showing a HAR capture grouped by host and request on the map alongside the inspector](docs/images/map.png)
 
-## What it does
+## When to use `jq` or DevTools instead
 
-**Open.** Drop a file on the window, paste text, or press Ctrl+O. On the desktop you can also pass a path on the
-command line. JSON, JSONC, HAR, NDJSON, YAML, TOML, XML, CSV and TSV open with their structure; anything else opens as
-plain text. A malformed JSON file still opens: Quipu shows the line and column of the first problem and the
-structure up to that point. Background workers read the file in pieces and index it, so the page stays responsive on
-a multi-gigabyte file.
+- Use `jq` or `rg` for files under a few dozen megabytes, scripted pipelines, and CI jobs where you already know the exact path you want.
+- Use browser DevTools for live step-debugging and inspecting traffic while a tab is running.
+- Use Quipu when you have a multi-hundred-megabyte or multi-gigabyte HAR or JSON dump on disk, nested base64 or stringified JSON payloads inside it, or edits you need to save back without copying the file into memory.
 
-**Look.** Three views share one selection:
+## What Quipu does
 
-- **Map**: the document as a node-link diagram on an infinite canvas, with zoom, pan, a minimap and zoom to fit. Long
-  arrays are split into ranges of 1,000, and HAR files are grouped into hosts, pages and requests.
-- **Tree**: an outline you can drive from the keyboard, with expand all and collapse all.
-- **Source**: the file's own text, colored by type, with the selection highlighted.
+- **Linked views.** Switch between Map (HAR grouped by host, page, and request), virtualized Tree, virtualized Table (with a HAR request preset, SVG timing waterfall, and status-colored timeline scrubber), and byte-virtualized Source without losing your selection. Compare opens a two-document diff mode. (Converted read-only formats show an unlinked Source view.)
+- **In-place decoding and deep search.** Decode nested stringified JSON, base64, data URLs, gzip streams, JWTs (marked unverified), GraphQL queries, URL-encoded forms, NDJSON, SVG and raster image previews, and HAR WebSocket frames per node, in bulk, or via per-kind auto-decode. Turn on **Deep decode** in the search bar to scan inside encoded payloads up to 8 stringified layers deep and inspect the decode chain.
+- **Exact value tracing and match filtering.** Select any scalar to find every exact occurrence across a capture (including encoded payloads), grouped by HAR entry and section with optional transient trace arcs on the map. Toggle **Show matches only** to filter Tree, Map, and Table to matching nodes and their ancestors.
+- **Search, JSONPath, and `jq`.** Parallel literal and regex search with worker timeouts, JSONPath queries including `[?(...)]` filter predicates, and `jq` (`jq-wasm 3.0.0`, bundling `jq 1.8.2`) either directly up to `64 MiB` or in per-element streaming mode across larger arrays and HAR captures.
+- **Real editing and streaming export.** Edit JSON and HAR values, rename keys, edit subtrees (`F2`), sort objects or arrays, format, and minify with unlimited undo/redo and crash-recovery journals. Search works immediately after sorts and reformats without saving first. Export to JSON, YAML, TOML, XML, CSV, TSV, or NDJSON with pre-flight structural checks.
+- **Diff, schema, and type generation.** Compare two JSON files structurally (with array identity matching and Myers LCS) or match HAR captures by `(method, url_without_fragment, _resourceType)` with `F7` stepping and inline body diffs. Infer shapes across every record, validate against local JSON Schema (draft 2020-12 and draft-07), and generate types for nine targets (TypeScript, Rust, Go, Python dataclasses, Python Pydantic, Kotlin, C#, Swift, and JSON Schema).
+- **Map annotations and themes.** Draw shapes, sticky notes, freehand ink, and node-bound arrows on standalone boards or over the map, and export the visible or whole map to PNG or SVG (up to `8192 px`). Includes six named themes plus Graphite, a `7:1` contrast High Contrast palette, an OKLCH editor, and VS Code theme import.
 
-An Inspector panel shows the selected value with its decoded forms, image previews and WebSocket frames.
+![HAR request table with SVG waterfall and timeline scrubber in Quipu](docs/images/table.png)
 
-**Search.**
+![HAR capture diff with inline body diff in Quipu](docs/images/compare.png)
 
-- Find: literal or regular expression, match case, a hit count, next and previous. Hits are highlighted in the Map,
-  Tree and Source.
-- Path queries such as `$.log.entries[*].request.url`, `$..id`, `[-1]` and slices, with clickable results.
-- jq (jq 1.8.2 compiled to WebAssembly) over the whole document or the selection, with a time limit.
+![Decoding nested payloads inside Quipu](docs/images/decode.png)
 
-**Decode.** Quipu detects encoded values inside a document: JSON stored in a string, base64, on its own or in a
-`data:` URL (text, JSON, images shown as images, gzip, other binary summarized), JWTs (header and payload; the
-signature is not verified), URL-encoded forms, GraphQL queries, NDJSON, SVG and HAR WebSocket frames. Decode one value
-with Ctrl+D or its badge, decode or collapse everything in a selection, or turn on automatic decoding per kind.
-Decoded values appear as children in the Map and the Tree.
+## How it works
 
-![Decoded values on the Map: a URL-encoded form, a JSON string and a base64 text opened into their own cards](docs/images/decode.png)
+Quipu reads JSON and HAR files from disk in `8 MiB` slices (`Blob.slice` in the browser, `fs.read` over `MessageChannelMain` in Electron) instead of loading the entire file into memory. Up to 16 parallel `scan.worker` threads scan regions in two passes using dual-hypothesis string parity, then adopt the per-region arrays into a `SegmentedTape` (25 bytes per token, `Uint32Array` byte offsets up to `4 GiB - 1 byte`). Containers past the eager token budget store `1,024`-entry bucket anchors and index on demand when expanded.
 
-**Edit** (JSON and HAR):
+Edits go into a zero-copy `PieceTable`, side-tapes, and crash-recovery journals stored in OPFS (browser) or `~/.quipu/userdata` (desktop). When OPFS is unavailable, in-place save (`detach()`) and transform spills fall back to an in-memory `Blob`. Search, path queries, `jq`, table views, and diffs read through the logical edited view. Multi-record operations (per-element `jq` across four pooled `jq-wasm` workers, streaming HAR capture diff, monoid-merged schema inference, and HAR validation) stream bounded `<= 64 MiB` child batches through `elementMap`.
 
-- Change strings, numbers, booleans and null in the Map, Tree, Source or Inspector. Typing JSON into a value
-  replaces it with an object or array.
-- Open an object or array as JSON text (F2, or from the Inspector), change it and write it back.
-- Rename keys. A name the object already has is refused.
-- Sort an object's keys, or an array by value or by a field; format or minify a value or the whole document.
-- Undo and redo every step (Ctrl+Z, Ctrl+Shift+Z).
-- Unsaved edits are kept in a journal. After a reload, or when you open the file again, Quipu offers to restore them.
+## Measured performance
 
-Edits are stored as a piece table over the original bytes, so the file is never copied into memory to change it.
-Search, path queries and jq read the edited document, not the file on disk.
+Measured on an Intel Core i9-14900 (32 threads, `62 GiB` RAM, Playwright Chromium `148.0.7778.96`, `1600x900`) against the production `apps/web/dist` build using cold browser launches and in-page `MutationObserver` timing:
 
-**Save and export.** Save in place, Save As, or download. Export converts the document, edits included, to JSON
-(indented or minified), YAML, TOML, XML, CSV, TSV or NDJSON. The export dialog says which targets cannot hold the
-data and why, and a conversion that meets a value it cannot write names that value's path instead of writing a partial
-file.
+| Fixture                                       | Metric                                        |                  Median | Range                    | Runs | Notes                                                          |
+| --------------------------------------------- | --------------------------------------------- | ----------------------: | ------------------------ | ---: | -------------------------------------------------------------- |
+| `100 MiB` JSON (`399,694` objects)            | First paint                                   |              `364.9 ms` | `342.0 to 372.1 ms`      |    5 | `421.8 ms` full tape index                                     |
+| `100 MiB` JSON                                | Plain literal search (`3/3`)                  |               `44.4 ms` | `42.9 to 47.9 ms`        |    5 | `1.65 GiB` (`1,686 MiB`) base RSS                              |
+| `100 MiB` JSON                                | Deep base64 search (`2/2`)                    |                `6.79 s` | `5.51 to 6.96 s`         |    5 | Every one of the `399,694` objects has a base64 field          |
+| `100 MiB` JSON                                | Schema inference                              |              `662.3 ms` | `651.8 to 675.3 ms`      |    3 | Merges all `399,694` array elements in parallel                |
+| `100 MiB` JSON                                | `jq` element mode (`3,997` hits)              |              `672.6 ms` | single run               |    1 | `51.1 MiB` jq worker heap                                      |
+| `250 MB` (`238.4 MiB`) HAR (`5,334` entries)  | First paint / ready                           | `335.0 ms` / `399.1 ms` | `317.7 to 343.9 ms`      |    5 | `60.0 fps` pan                                                 |
+| `250 MB` HAR                                  | Plain search (`4/4`) / deep (`2/2`)           | `184.0 ms` / `939.1 ms` | `888.1 to 1,016.1 ms`    |    5 | Finds base64 wrapping double-stringified JSON                  |
+| `250 MB` HAR                                  | Table open / status sort                      |  `143.7 ms` / `43.9 ms` | `136.5 to 164.5 ms`      |    3 | `5,334` HAR rows                                               |
+| `2.00 GB` (`1.86 GiB`) HAR (`40,398` entries) | First paint / ready                           |   `365.9 ms` / `1.60 s` | `1.32 to 1.78 s`         |    3 | `1.50 GiB` (`1,538 MiB`) pre-deep peak RSS                     |
+| `2.00 GB` HAR                                 | Plain search (`4/4`)                          |                `1.46 s` | `1.45 to 1.46 s`         |    3 | `60.0 fps` pan                                                 |
+| `2.00 GB` HAR                                 | Deep base64 search (`2/2`)                    |                `7.95 s` | `7.87 to 8.04 s`         |    3 | `2.34 GiB` (`2,401 MiB`) full-session RSS                      |
+| `2.00 GB` HAR                                 | Live scalar edit                              |               `36.9 ms` | single run               |    1 | `PieceTable` edit on `entries[5].request.url`                  |
+| `2.00 GB` HAR                                 | Table open / status sort                      |  `598.4 ms` / `37.5 ms` | `443.8 to 603.0 ms` open |    3 | `443.8 ms` on cool run 1; `598 to 603 ms` back-to-back         |
+| `2.00 GB` HAR                                 | `jq` element mode (`.request.url`)            |                `8.15 s` | `6.79 to 8.15 s`         |    3 | `85.6 MiB` jq heap; isolates single `> 64 MiB` entry `#21114`  |
+| Two `2.00 GB` HARs (`3.72 GiB` total)         | HAR capture diff (`40,397` same, `1` changed) |                `5.57 s` | `5.37 to 5.69 s`         |    3 | Includes opening File B; best-case 1-edit copy; `3.59 GiB` RSS |
 
-**Draw.** Boards are drawings without a document: rectangles, ellipses, diamonds, arrows that stay attached to shapes,
-lines, freehand, text, sticky notes, frames, images and an eraser, with a sketchy or clean style, alignment,
-grouping, layers and snapping. Frames can be named. The same tools work on top of a document's map, and arrows can
-attach to its nodes. Drawings save automatically.
+Every run above recorded zero console errors and zero page errors. Two memory and timing details worth noting: base RSS on `100 MiB` JSON sits at `1.65 GiB` because Chromium holds up to 26 resident worker threads across scan, format, and `jq` pools, and deep search takes `6.79 s` on `100 MiB` JSON (versus `0.94 s` on `250 MB` HAR) because the synthetic JSON fixture places a base64 field on every single one of its `399,694` objects.
 
-![A board: a request flow drawn with shapes, attached arrows, sticky notes, text and an image](docs/images/board.png)
+## Pairs with Hark
 
-**Themes.** Seven built-in palettes, each in light and dark, a theme editor, and VS Code color themes, either
-imported from a file or installed from [Open VSX](https://open-vsx.org) inside the app.
+Quipu opens streaming HAR exports from [Hark](https://github.com/tretuttle/hark) directly, including out-of-order `entries` before `version`, response bodies over `3 MiB` encoded as `base64`, and `size: -1` missing-body annotations.
 
-**Keyboard.** Every command is in the command palette (Ctrl+K) with its shortcut. Shift+? lists the shortcuts, and
-Settings → Keybindings rebinds them.
+## Limits and requirements
 
-### Formats
+- **Size limits.** Tested up to a `2.00 GB` (`1.86 GiB`) HAR and `100 MiB` JSON. `MAX_TAPE_SOURCE_BYTES` is `4 GiB - 1 byte` because tape offsets use `Uint32Array`.
+- **Editable formats.** Only `JSON` and `HAR` are editable. Saving in place copies the open file to OPFS scratch (or an in-memory `Blob` when OPFS is unavailable) before overwriting. `YAML` and `TOML` parse whole up to `256 MiB` and open read-only alongside `JSONC`, `NDJSON`, `XML`, `CSV`, `TSV`, and plain text; converted formats show an unlinked read-only Source view.
+- **64 MiB slice cap.** Single decoded strings, `F2` subtree edits, whole-document `jq`, inline HAR body diffs, and single elements in `jq` element mode cap at `64 MiB` (`MAX_SLICE_BYTES`). For larger JSON arrays or HAR files, `jq` offers per-element mode instead of materializing the file.
+- **Diff and schema caps.** Generic structural JSON diff caps at `256 MiB` and refuses unexpanded tapes; HAR entry diff streams bounded batches up to the `4 GiB - 1 byte` source ceiling. JSON Schema validation refuses remote `$ref` (zero network fetches) and rejects `unevaluatedProperties` and `unevaluatedItems`.
+- **Deep search is opt-in.** Because recursive base64 and gzip decoding runs about `5.5x` slower than plain search on a `2.00 GB` HAR (`7.95 s` versus `1.46 s`), **Deep decode** defaults to off and remembers your toggle state.
+- **Cross-origin isolation.** The browser app requires `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` so `SharedArrayBuffer` workers can run.
+- **Privacy and CSP.** Both web and Electron builds ship a Content Security Policy (`default-src 'self'`, `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'`, `connect-src 'self' blob: https://open-vsx.org https://openvsx.eclipsecontent.org`), contacting Open VSX only when you browse VS Code themes. The web E2E suite (`apps/web/e2e/privacy.e2e.ts`) verifies zero unexpected outbound requests.
+- **Desktop builds.** Electron packages unsigned Linux `x86_64` AppImages on Linux (`vp run dist:desktop:linux`). Windows `x64` NSIS packaging is configured via `vp run dist:desktop:win` on Windows and is not pre-built yet. There is no macOS build.
 
-| Format           | Opens with structure   | Editable | Size limit for structure |
-| ---------------- | ---------------------- | -------- | ------------------------ |
-| JSON, HAR        | yes                    | yes      | 4 GiB                    |
-| JSONC            | yes                    | no       | 4 GiB                    |
-| NDJSON, CSV, TSV | yes, converted to JSON | no       | 4 GiB of converted JSON  |
-| XML              | yes, converted to JSON | no       | 4 GiB of converted JSON  |
-| YAML, TOML       | yes, converted to JSON | no       | 256 MiB                  |
-| Anything else    | no, plain text         | no       |                          |
+## Build and run
 
-A file of a known format over its limit opens as plain text, and Quipu refuses any file over 4 GiB. You can search,
-query and export the read-only formats, and save them back unchanged; to change one, export it to JSON and open that.
-
-## Privacy
-
-Quipu has no accounts, no server and no telemetry. The only network request it makes is to Open VSX, when you search
-for or install a theme. The end-to-end tests enforce this: a test fails if its page asks any other host for anything.
-On the web, documents, drawings and settings stay in the browser's own storage for the site (IndexedDB, the origin
-private file system and localStorage). On the desktop, drawings and unsaved edits live in `~/.quipu/userdata`, and
-settings, keybindings and recent files in the app's user data folder.
-
-## Run it from source
-
-Prerequisites:
-
-- Node.js 24.21.0, pinned in [`mise.toml`](mise.toml). With [mise](https://mise.jdx.dev), `mise install` sets it up.
-- pnpm 11.10.0, pinned by `packageManager` in [`package.json`](package.json) (Corepack or mise picks it up).
-- [Vite+](https://viteplus.dev) as `vp`. After the first install, use the workspace's copy in `node_modules/.bin`.
+Requires Node `24.21.0` and Vite+ (`vite-plus@1.0.0`), pinned in `mise.toml`.
 
 ```sh
-vp i                      # install dependencies
-vp run dev                # web app on http://localhost:5300 (set PORT to change it)
+git clone https://github.com/tretuttle/quipu.git
+cd quipu
+mise trust && mise install
+vp i
 ```
 
-The desktop app runs against the web dev server. Keep `vp run dev` running, and in a second terminal:
+Run locally:
 
 ```sh
-VITE_DEV_SERVER_URL=http://localhost:5300 vp run dev:desktop
+vp run dev:web        # browser app with COOP/COEP headers
+vp run dev:desktop    # Electron desktop app
+vp run build          # web, desktop, and marketing builds
 ```
 
-To build the desktop packages:
+Verify:
 
 ```sh
-vp run dist:desktop:linux # release/Quipu-<version>-x86_64.AppImage (needs ImageMagick)
-vp run dist:desktop:win   # release/Quipu-<version>-x64.exe, run on Windows
+vp run check          # format, lint, and typecheck across all 10 workspaces
+vp run knip:check     # unused files, dependencies, and exports
+vp run test           # unit tests across all packages and apps
+vp run --filter @quipu/web test:e2e
+vp run test:desktop-smoke
 ```
 
-Both packages are unsigned. There is no macOS build.
-
-## Tests
+Package desktop binaries:
 
 ```sh
-vp run test               # unit tests in every package
-vp run test:e2e           # web in headless Chromium, desktop through Electron
-vp run fixtures           # generate the large test fixtures in ~/.cache/quipu/fixtures
+vp run dist:desktop:linux   # Linux x86_64 AppImage in release/
+vp run dist:desktop:win     # Windows x64 NSIS installer (run on Windows)
 ```
-
-The end-to-end tests need Chromium for `playwright-core`; `CONTRIBUTING.md` has the one-line install. The large
-fixtures, including a 2 GB HAR, are generated from a fixed seed and take several gigabytes of disk. Tests that need
-one skip when it is missing.
-
-The end-to-end tests on the 2 GB files also time the product. On a 24-core desktop, the first rows of the 2 GB HAR
-appear in about 0.8 s, a literal search with about 32,000 hits takes about 1.2 s, a 60 MiB nested body expands in
-under 0.2 s, and an edit to a value shows in about 0.1 s. Each timing is checked against a budget on the median of
-five runs. By default a missed budget is reported, not failed; set `QUIPU_ENFORCE_BUDGETS=1` to make it fail.
-
-[CONTRIBUTING.md](CONTRIBUTING.md) has every command, the architecture rules and how to send a change.
-
-## Limits
-
-- Only JSON and HAR can be edited. The other formats open read-only; export one to JSON to edit it.
-- For converted formats (everything except JSON, JSONC and HAR), the Source view shows the file as written but does
-  not follow the selection or show search hits.
-- YAML and TOML open with structure up to 256 MiB. Any file over 4 GiB is refused; the tests go up to 2 GB.
-- Plain text files get the Source view and Find only.
-- Conversions are exact only for what the target can express. XML, for example, cannot tell a one-element array from
-  a single value, and TOML cannot hold `null` or a top-level array.
-- jq stops after 10 seconds by default. Path queries return at most 10,000 results.
-- Unsaved edits belong to one tab at a time. A document that another tab has open with unsaved edits opens without
-  them here after a short wait, and says so.
-- Whether a file is valid JSON is checked when it opens. After an edit the notice says so; save and reopen to check
-  again.
-- Desktop builds exist for Linux and Windows only, and they are unsigned.
-
-## Repository layout
-
-- [`apps/web`](apps/web): the React app, including the views, the map and settings.
-- [`apps/desktop`](apps/desktop): the Electron wrapper: native file access, saving and the desktop shell.
-- [`apps/marketing`](apps/marketing): the marketing site.
-- [`packages/core`](packages/core): the document engine: streaming index, piece table, search and bounded slices.
-- [`packages/formats`](packages/formats): format detection, readers and converters.
-- [`packages/canvas`](packages/canvas): scene model, layout, hit testing and the drawing tools.
-- [`packages/contracts`](packages/contracts): typed schemas for everything that crosses a worker or IPC boundary.
-- [`packages/shared`](packages/shared): small utilities shared by the apps.
-
-[`docs/internals`](docs/internals) explains the [document engine](docs/internals/document-engine.md),
-[formats](docs/internals/formats.md), [the web UI](docs/internals/web-ui.md) and
-[the desktop app](docs/internals/desktop.md).
-
-The name: a quipu is the Inca record of knotted cords, strings hanging from strings, a tree of strings that carries
-data.
 
 ## License
 
-Quipu is released under the [MIT License](LICENSE).
-
-Its application shell and much of its tooling are adapted from [T3 Code](https://github.com/pingdotgg/t3code), which
-is also MIT. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) credits it and every other source with its license. The
-app lists the notices of those projects and of the packages it is built from under Settings → Open source licenses.
+MIT. See [LICENSE](LICENSE). Third-party components and adapted codebases are credited in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

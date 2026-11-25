@@ -32,40 +32,42 @@ Quipu reads JSON and HAR files from disk in `8 MiB` slices (`Blob.slice` in the 
 
 Edits go into a zero-copy `PieceTable`, side-tapes, and crash-recovery journals stored in OPFS (browser) or `~/.quipu/userdata` (desktop). When OPFS is unavailable, in-place save (`detach()`) and transform spills fall back to an in-memory `Blob`. Search, path queries, `jq`, table views, and diffs read through the logical edited view. Multi-record operations (per-element `jq` across four pooled `jq-wasm` workers, streaming HAR capture diff, monoid-merged schema inference, and HAR validation) stream bounded `<= 64 MiB` child batches through `elementMap`.
 
-## Build and run
+## Download
 
-Requires Node `24.21.0` and Vite+ (`vite-plus@1.0.0`), pinned in `mise.toml`.
+Prebuilt desktop binaries for Windows (`x64` installer) and Linux (`x86_64` AppImage) are available on the [Releases](https://github.com/tretuttle/quipu/releases/latest) page (unsigned; checksums in `SHA256SUMS.txt`).
+
+## Build from source
+
+Requires Node `24.13.1+` and `vite-plus@1.0.0` (both pinned in `mise.toml`, or install globally with `npm i -g vite-plus@1.0.0`).
 
 ```sh
 git clone https://github.com/tretuttle/quipu.git
 cd quipu
-mise trust && mise install
+mise trust && mise install   # optional if Node 24+ and vp are already installed
 vp i
 ```
 
 Run locally:
 
 ```sh
-vp run dev:web        # browser app with COOP/COEP headers
-vp run dev:desktop    # Electron desktop app
-vp run build          # web, desktop, and marketing builds
+vp run dev:web       # browser app
+vp run dev:desktop   # Electron desktop app
 ```
 
-Verify:
+Build and package:
 
 ```sh
-vp run check          # format, lint, and typecheck across all 10 workspaces
-vp run knip:check     # unused files, dependencies, and exports
-vp run test           # unit tests across all packages and apps
-vp run --filter @quipu/web test:e2e
-vp run test:desktop-smoke
+vp run build                # build web, desktop, and marketing apps
+vp run dist:desktop:win     # Windows x64 NSIS installer (release/)
+vp run dist:desktop:linux   # Linux x86_64 AppImage (release/)
 ```
 
-Package desktop binaries:
+Tests and checks:
 
 ```sh
-vp run dist:desktop:linux   # Linux x86_64 AppImage in release/
-vp run dist:desktop:win     # Windows x64 NSIS installer (run on Windows)
+vp run check                # format, lint, and typecheck
+vp run test                 # unit tests
+vp run test:e2e             # end-to-end tests
 ```
 
 ## License

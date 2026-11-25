@@ -89,12 +89,12 @@ describe("theme failure handling", () => {
     expect(readThemePreference()).toBe("orchid");
   });
 
-  it("gives a new install the Quipu palette, following the system", async () => {
+  it("gives a new install the stock Graphite look, following the system", async () => {
     vi.stubGlobal("window", { localStorage: createStorage() });
 
     const { readAppearanceModePreference, readThemePreference } = await import("./useTheme");
 
-    expect(readThemePreference()).toBe("quipu");
+    expect(readThemePreference()).toBe("system");
     expect(readAppearanceModePreference(readThemePreference())).toBe("system");
   });
 

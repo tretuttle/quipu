@@ -69,7 +69,7 @@ Quipu opens streaming HAR exports from [Hark](https://github.com/tretuttle/hark)
 - **Deep search is opt-in.** Because recursive base64 and gzip decoding runs about `5.5x` slower than plain search on a `2.00 GB` HAR (`7.95 s` versus `1.46 s`), **Deep decode** defaults to off and remembers your toggle state.
 - **Cross-origin isolation.** The browser app requires `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` so `SharedArrayBuffer` workers can run.
 - **Privacy and CSP.** Both web and Electron builds ship a Content Security Policy (`default-src 'self'`, `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'`, `connect-src 'self' blob: https://open-vsx.org https://openvsx.eclipsecontent.org`), contacting Open VSX only when you browse VS Code themes. The web E2E suite (`apps/web/e2e/privacy.e2e.ts`) verifies zero unexpected outbound requests.
-- **Desktop builds.** Electron packages unsigned Linux `x86_64` AppImages on Linux (`vp run dist:desktop:linux`). Windows `x64` NSIS packaging is configured via `vp run dist:desktop:win` on Windows and is not pre-built yet. There is no macOS build.
+- **Desktop builds.** Electron packages unsigned Linux `x86_64` AppImages (`vp run dist:desktop:linux`) and Windows `x64` NSIS installers (`vp run dist:desktop:win`). There is no macOS build.
 
 ## Build and run
 

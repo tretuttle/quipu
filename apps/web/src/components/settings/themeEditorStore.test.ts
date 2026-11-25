@@ -9,7 +9,6 @@ import {
   OCEAN_THEME_ID,
   ORCHID_THEME,
   ORCHID_THEME_ID,
-  QUIPU_THEME,
   THEME_PREVIEW_ID,
 } from "../../themePalette";
 import { ThemeEditorHost } from "./ThemeEditorHost";
@@ -92,11 +91,9 @@ describe("toggleThemeEditorForTheme", () => {
       });
     });
 
-    // Nothing is stored, so closing goes back to the default palette.
+    // Nothing is stored, so closing goes back to the stock Graphite look.
     expect(document.querySelector("[data-theme-editor-panel]")).toBeNull();
-    expect(document.documentElement.dataset.themeId).toBe(QUIPU_THEME.id);
-    expect(document.documentElement.style.getPropertyValue("--app-theme-canvas")).toBe(
-      getThemeColorsForMode(QUIPU_THEME, "light")!.canvas,
-    );
+    expect(document.documentElement.dataset.themeId).toBeUndefined();
+    expect(document.documentElement.style.getPropertyValue("--app-theme-canvas")).toBe("");
   });
 });

@@ -255,8 +255,8 @@
           const themeIdOf = (preference) => preference ?? "";
           const rawStoredTheme = window.localStorage.getItem("quipu:theme");
           const rawThemeId = themeIdOf(rawStoredTheme);
-          // A new install, with nothing usable stored, wears the default
-          // palette and follows the OS. Mirrors the runtime's
+          // A new install, with nothing usable stored, wears the stock Graphite
+          // look and follows the OS. Mirrors the runtime's
           // DEFAULT_THEME_PREFERENCE.
           const isNewInstall = !(
             rawStoredTheme === "light" ||
@@ -265,7 +265,7 @@
             BUILT_IN_THEME_MODES[rawThemeId] !== undefined ||
             findCustomTheme(rawThemeId) !== null
           );
-          const storedTheme = isNewInstall ? "quipu" : rawStoredTheme;
+          const storedTheme = isNewInstall ? "system" : rawStoredTheme;
           const themeId = themeIdOf(storedTheme);
           const builtInModes = BUILT_IN_THEME_MODES[themeId] ?? null;
           const customTheme = builtInModes ? null : findCustomTheme(themeId);

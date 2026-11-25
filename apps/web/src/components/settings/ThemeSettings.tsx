@@ -55,14 +55,14 @@ import {
 import { ThemeWireframe } from "./ThemeWireframe";
 import { themeVariantLabels } from "./themeVariantLabels";
 
-// Quipu leads as the default; Graphite, the stock look, follows it.
-const LEADING_BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [QUIPU_THEME];
+// Graphite, the stock look, leads as the default; named built-in palettes follow.
 const TRAILING_BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [
   ORCHID_THEME,
   GROVE_THEME,
   OCEAN_THEME,
   EMBER_THEME,
   IRIS_THEME,
+  QUIPU_THEME,
   HIGH_CONTRAST_THEME,
 ];
 
@@ -826,7 +826,6 @@ export function ThemeLibrary({
         className="grid w-full gap-2"
         style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 16rem), 1fr))" }}
       >
-        {LEADING_BUILT_IN_THEMES.map(renderBuiltInCard)}
         {STANDARD_THEME_CARDS.map((standardTheme) => (
           <ThemeLibraryCard
             activeModes={pickedModesFor(null)}

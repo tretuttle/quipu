@@ -252,14 +252,14 @@ describe("index.html boot script", () => {
     expect(boot.isDark).toBe(runtimeResolvedAppearance(storage, prefersDark) === "dark");
   });
 
-  it("dresses a new install in the Quipu palette, following the OS", () => {
+  it("dresses a new install in the stock Graphite look, following the OS", () => {
     for (const prefersDark of [false, true]) {
       const boot = runBootScript({ storage: {}, prefersDark });
-      const colors = getThemeColorsForMode(QUIPU_THEME, prefersDark ? "dark" : "light")!;
-      expect(boot.themeId).toBe("quipu");
+      const expectedBackground = prefersDark ? "#0a0a0a" : "#ffffff";
+      expect(boot.themeId).toBeUndefined();
       expect(boot.isDark).toBe(prefersDark);
-      expect(boot.bootVariables["--boot-background"]).toBe(colors.canvas);
-      expect(boot.backgroundColor).toBe(colors.chrome);
+      expect(boot.bootVariables["--boot-background"]).toBe(expectedBackground);
+      expect(boot.backgroundColor).toBe(expectedBackground);
     }
   });
 
@@ -267,6 +267,13 @@ describe("index.html boot script", () => {
     const boot = runBootScript({ storage: { [THEME_STORAGE_KEY]: "system" }, prefersDark: true });
     expect(boot.themeId).toBeUndefined();
     expect(boot.isDark).toBe(true);
+  });
+
+  it("keeps the Quipu palette for a user who chose it", () => {
+    const boot = runBootScript({ storage: { [THEME_STORAGE_KEY]: "quipu" }, prefersDark: true });
+    const colors = getThemeColorsForMode(QUIPU_THEME, "light")!;
+    expect(boot.themeId).toBe("quipu");
+    expect(boot.backgroundColor).toBe(colors.chrome);
   });
 
   it("marks built-in and custom themes on the document element", () => {
@@ -495,20 +502,20 @@ describe("index.html boot script", () => {
       prefersDark: false,
     });
 
-    const quipuLight = getThemeColorsForMode(QUIPU_THEME, "light")!;
-    expect(boot.themeId).toBe("quipu");
-    expect(boot.backgroundColor).toBe(quipuLight.chrome);
-    expect(boot.metaContent).toBe(quipuLight.chrome);
+    expect(boot.themeId).toBeUndefined();
+    expect(boot.backgroundColor).toBe("#ffffff");
+    expect(boot.metaContent).toBe("#ffffff");
   });
 
-  it("paints the default palette for an unknown preference, as the runtime does", () => {
+  it("paints the default look for an unknown preference, as the runtime does", () => {
     const boot = runBootScript({
       storage: { [THEME_STORAGE_KEY]: "gone-theme" },
       prefersDark: true,
     });
-    expect(boot.themeId).toBe("quipu");
+    expect(boot.themeId).toBeUndefined();
     expect(boot.themeSelected).toBe("true");
     expect(boot.isDark).toBe(true);
+    expect(boot.backgroundColor).toBe("#0a0a0a");
   });
 
   it("follows the OS appearance when storage is unavailable", () => {

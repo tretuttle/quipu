@@ -47,19 +47,11 @@ describe("palettes", () => {
     await withPage(async (page) => {
       await page.getByRole("button", { name: "Use light mode" }).click();
       const painted = new Map<string, string>();
-      // A new install starts on the Quipu palette.
-      painted.set("Quipu", await paintedSurfaces(page));
+      // A new install starts on the stock Graphite look.
+      painted.set("Graphite", await paintedSurfaces(page));
 
-      let previous = painted.get("Quipu")!;
-      for (const label of [
-        "Graphite",
-        "Orchid",
-        "Grove",
-        "Ocean",
-        "Ember",
-        "High Contrast",
-        "Iris",
-      ]) {
+      let previous = painted.get("Graphite")!;
+      for (const label of ["Orchid", "Grove", "Ocean", "Ember", "Quipu", "High Contrast", "Iris"]) {
         await page.getByRole("button", { name: new RegExp(`^Use ${label} theme`) }).click();
         await page.waitForFunction((from) => {
           const paint = (selector: string) => {

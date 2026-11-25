@@ -43,7 +43,7 @@ export type { ThemeSyntax };
 
 export const ORCHID_THEME_ID = "orchid" as const;
 /** What a new install wears until the user picks something else. */
-export const DEFAULT_THEME_PREFERENCE = QUIPU_THEME.id;
+export const DEFAULT_THEME_PREFERENCE = "system" as const;
 export const OCEAN_THEME_ID = "ocean" as const;
 export const THEME_FILE_VERSION = 1 as const;
 export const CUSTOM_THEMES_STORAGE_KEY = "quipu:themes:v1";

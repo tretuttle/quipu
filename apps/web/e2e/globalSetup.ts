@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - resolves vite.config.ts across POSIX and Windows in Playwright E2E setup.
+import * as NodeURL from "node:url";
+
 import { chromium } from "playwright-core";
 import type { TestProject } from "vite-plus/test/node";
 import { createServer } from "vite-plus";
@@ -23,7 +26,7 @@ const ROUTES = [
  */
 export default async function setup(project: TestProject) {
   const server = await createServer({
-    configFile: new URL("../vite.config.ts", import.meta.url).pathname,
+    configFile: NodeURL.fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
     logLevel: "warn",
     // Port 0 lets the OS pick a free port, so parallel worktrees never collide.
     server: { host: "127.0.0.1", port: 0, strictPort: true },

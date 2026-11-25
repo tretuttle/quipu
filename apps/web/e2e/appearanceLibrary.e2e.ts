@@ -29,14 +29,16 @@ function toastTitled(page: Page, title: string) {
 }
 
 describe("built-in palettes", () => {
-  it("dresses a new install in the Quipu palette, following the system", async () => {
+  it("dresses a new install in the Graphite look, following the system", async () => {
     await withPage(async (page) => {
-      expect(await themeId(page)).toBe("quipu");
-      const quipu = page.locator('[data-theme-library-card="quipu"]');
-      await quipu
-        .getByRole("button", { name: "Use Quipu for light mode", pressed: true })
+      expect(await themeId(page)).toBeNull();
+      const graphite = page.locator('[data-theme-library-card="default"]');
+      await graphite
+        .getByRole("button", { name: "Use Graphite for light mode", pressed: true })
         .waitFor();
-      await quipu.getByRole("button", { name: "Use Quipu for dark mode", pressed: true }).waitFor();
+      await graphite
+        .getByRole("button", { name: "Use Graphite for dark mode", pressed: true })
+        .waitFor();
       await page
         .getByRole("button", { name: "Follow the system appearance", pressed: true })
         .waitFor();
@@ -50,13 +52,13 @@ describe("built-in palettes", () => {
         .getByRole("button", { name: /^Use .* theme/ })
         .allTextContents();
       expect(titles).toEqual([
-        "Quipu",
         "Graphite",
         "Orchid",
         "Grove",
         "Ocean",
         "Ember",
         "Iris",
+        "Quipu",
         "High Contrast",
       ]);
       expect(await page.locator("body").innerText()).not.toMatch(/\bT3\b/);
@@ -267,6 +269,8 @@ describe("color scheme miniatures", () => {
   it("draw Quipu's sidebar and map in the active palette", async () => {
     await withPage(async (page) => {
       await page.getByRole("button", { name: "Use light mode" }).click();
+      await page.getByRole("button", { name: /^Use Ocean theme/ }).click();
+      await page.waitForFunction(() => document.documentElement.dataset.themeId === "ocean");
       const light = page
         .getByRole("button", { name: "Use light mode" })
         .locator("[data-theme-wireframe] svg");
